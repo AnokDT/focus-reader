@@ -1,5 +1,6 @@
 import { useRef, useEffect, useCallback, useState } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
+import { ocrService } from '@/services/ocrService'
 
 interface PDFPageRendererProps {
   pdf: pdfjsLib.PDFDocumentProxy
@@ -7,6 +8,7 @@ interface PDFPageRendererProps {
   scale: number
   isVisible: boolean
   isDarkMode?: boolean
+  selectMode?: boolean
   onTextExtracted?: (pageNumber: number, text: string) => void
   onDimensionsReady?: (pageNumber: number, width: number, height: number) => void
   onWordSelect?: (word: string, x: number, y: number) => void
@@ -18,6 +20,7 @@ export function PDFPageRenderer({
   scale,
   isVisible,
   isDarkMode = false,
+  selectMode = false,
   onTextExtracted,
   onDimensionsReady,
   onWordSelect,
@@ -66,15 +69,28 @@ export function PDFPageRenderer({
       setRendered(true)
       setLoading(false)
 
-      // Extract text content for text layer and search
+      // Extract text content for search and RSVP
       if (onTextExtracted) {
         const content = await page.getTextContent()
-        const text = content.items.map((item: any) => item.str).join(' ')
+        let text = content.items.map((item: any) => item.str).join(' ')
+
+        // If text is sparse/empty (image-based PDF), try OCR
+        if (text.trim().length < 20) {
+          try {
+            const ocrResult = await ocrService.recognizePDFPage(pdf, pageNumber, 2)
+            if (ocrResult.text.trim().length > text.trim().length) {
+              text = ocrResult.text
+            }
+          } catch {
+            // OCR failed, use extracted text as-is
+          }
+        }
+
         onTextExtracted(pageNumber, text)
       }
 
-      // Build invisible text layer for word selection
-      if (textLayerRef.current && onWordSelect) {
+      // Build text layer for word selection (only when selectMode is active)
+      if (textLayerRef.current) {
         const content = await page.getTextContent()
         const textLayer = textLayerRef.current
         textLayer.innerHTML = ''
@@ -97,14 +113,16 @@ export function PDFPageRenderer({
           span.style.fontSize = `${h * 0.8}px`
           span.style.fontFamily = 'sans-serif'
           span.style.color = 'transparent'
-          span.style.cursor = 'text'
+          span.style.cursor = selectMode ? 'text' : 'default'
           span.style.lineHeight = '1'
           span.style.whiteSpace = 'pre'
+          span.style.userSelect = selectMode ? 'text' : 'none'
 
           span.addEventListener('mouseup', () => {
+            if (!selectMode || !onWordSelect) return
             const selection = window.getSelection()
             const selectedText = selection?.toString().trim() || ''
-            if (selectedText && selectedText.length === 1 || (selectedText.length <= 20 && !selectedText.includes(' '))) {
+            if (selectedText.length >= 2 && selectedText.length <= 30 && !selectedText.includes(' ')) {
               const rect = span.getBoundingClientRect()
               onWordSelect(selectedText, rect.left, rect.bottom)
             }
@@ -119,7 +137,7 @@ export function PDFPageRenderer({
       }
       setLoading(false)
     }
-  }, [pdf, pageNumber, scale, isVisible, rendered, onTextExtracted, onDimensionsReady, onWordSelect])
+  }, [pdf, pageNumber, scale, isVisible, rendered, selectMode, onTextExtracted, onDimensionsReady, onWordSelect])
 
   useEffect(() => {
     if (isVisible && !rendered) {
@@ -142,16 +160,19 @@ export function PDFPageRenderer({
         className={`block ${isDarkMode ? 'pdf-canvas-dark' : ''}`}
         style={{ imageRendering: 'auto' }}
       />
-      {/* Invisible text layer for word selection */}
+      {/* Text layer — only interactive in selectMode, always pointer-events:none to prevent bleeding */}
       <div
         ref={textLayerRef}
-        className="absolute inset-0 pointer-events-auto select-text"
-        style={{ mixBlendMode: 'multiply' }}
+        className="absolute inset-0"
+        style={{
+          pointerEvents: selectMode ? 'auto' : 'none',
+          userSelect: selectMode ? 'text' : 'none',
+        }}
       />
 
       {loading && isVisible && (
         <div
-          className="absolute inset-0 flex flex-col items-center justify-center bg-[var(--color-surface-1)] rounded-sm"
+          className={`absolute inset-0 flex flex-col items-center justify-center rounded-sm ${isDarkMode ? 'bg-[#1a1a2e]' : 'bg-white'}`}
           style={{ width: pageWidth || 612, height: pageHeight || 792 }}
         >
           <div className="flex flex-col items-center gap-3">

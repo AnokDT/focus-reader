@@ -33,6 +33,8 @@ interface ReaderHeaderProps {
   onToggleRSVP: () => void
   onToggleVocabulary: () => void
   onToggleInsights: () => void
+  selectMode: boolean
+  onToggleSelectMode: () => void
 }
 
 export function ReaderHeader({
@@ -53,6 +55,8 @@ export function ReaderHeader({
   onToggleRSVP,
   onToggleVocabulary,
   onToggleInsights,
+  selectMode,
+  onToggleSelectMode,
 }: ReaderHeaderProps) {
   return (
     <header className="h-12 border-b border-[var(--color-surface-3)] bg-[var(--color-surface-1)] flex items-center justify-between px-4 shrink-0 theme-transition z-20">
@@ -119,6 +123,9 @@ export function ReaderHeader({
         </Tooltip>
         <Tooltip content="Reading insights (I)">
           <Button variant="ghost" size="sm" onClick={onToggleInsights} icon={<BookOpen size={15} />} />
+        </Tooltip>
+        <Tooltip content="Select text (S)">
+          <Button variant={selectMode ? 'secondary' : 'ghost'} size="sm" onClick={onToggleSelectMode} icon={<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 7V4h16v3M9 20h6M12 4v16"/></svg>} />
         </Tooltip>
         <Tooltip content="Search (Ctrl+F)">
           <Button variant="ghost" size="sm" onClick={() => useUIStore.getState().toggleSearch()} icon={<Search size={15} />} />
