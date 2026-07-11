@@ -170,11 +170,23 @@ input[type="number"] {
 
 /* Text layer spans — invisible but selectable */
 [data-page-number] span[data-text] {
-  color: rgba(0, 0, 0, 0.001) !important;
+  color: transparent !important;
+  background: transparent !important;
   user-select: text !important;
   -webkit-user-select: text !important;
   cursor: text;
 }
 [data-page-number] span[data-text]:hover {
-  background-color: rgba(59, 130, 246, 0.08);
+  background-color: rgba(59, 130, 246, 0.06) !important;
+}
+
+/* RTL text support for Arabic, Hebrew, etc. */
+[data-page-number] span[data-text]:dir(rtl) {
+  direction: rtl;
+  text-align: right;
+}
+
+/* CJK and complex script support */
+[data-page-number] span[data-text] {
+  font-family: sans-serif, 'Noto Sans', 'Noto Sans Malayalam', 'Noto Sans Devanagari', 'Noto Sans Arabic', 'Noto Sans SC', system-ui;
 }

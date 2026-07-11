@@ -10,7 +10,7 @@ interface PDFPageRendererProps {
   onTextExtracted?: (pageNumber: number, text: string) => void
   onDimensionsReady?: (pageNumber: number, width: number, height: number) => void
   onWordSelect?: (word: string, x: number, y: number) => void
-  onPositionExtracted?: (pageNumber: number, positions: { word: string; x: number; y: number; width: number; height: number }[]) => void
+  onPositionExtracted?: (pageNumber: number, positions: { word: string; x: number; y: number; width: number; height: number; isItem?: boolean }[]) => void
 }
 
 function applyTransform(t1: number[], t2: number[]): number[] {
@@ -86,7 +86,7 @@ export function PDFPageRenderer({
         if (textLayerRef.current) {
           const textLayer = textLayerRef.current
           textLayer.innerHTML = ''
-          const positions: { word: string; x: number; y: number; width: number; height: number }[] = []
+          const positions: { word: string; x: number; y: number; width: number; height: number; isItem?: boolean }[] = []
 
           content.items.forEach((item: any) => {
             if (!item.str || !item.transform) return
@@ -123,26 +123,17 @@ export function PDFPageRenderer({
             span.style.webkitUserSelect = 'text'
             span.style.pointerEvents = 'auto'
 
-            // Collect word positions for RSVP
+            // Collect word positions for RSVP — map words to text item positions
             if (onPositionExtracted) {
-              const words = item.str.split(/(\s+)/)
-              let xOffset = 0
-              const charWidth = itemWidth / Math.max(item.str.length, 1)
-
-              words.forEach((word: string) => {
-                if (word.trim().length === 0) {
-                  xOffset += word.length * charWidth
-                  return
-                }
-                const wordWidth = word.length * charWidth
-                positions.push({
-                  word,
-                  x: (screenX + xOffset) / viewport.width,
-                  y: screenY / viewport.height,
-                  width: wordWidth / viewport.width,
-                  height: fontHeight / viewport.height,
-                })
-                xOffset += wordWidth
+              // Each text item becomes one position entry using its full text
+              // Words are matched sequentially across items
+              positions.push({
+                word: item.str,
+                x: screenX / viewport.width,
+                y: screenY / viewport.height,
+                width: itemWidth / viewport.width,
+                height: fontHeight / viewport.height,
+                isItem: true, // marker: this is a full text item, not a single word
               })
             }
 

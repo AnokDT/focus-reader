@@ -48,7 +48,7 @@ export function ReaderPage() {
   const [currentSearchIndex, setCurrentSearchIndex] = useState(0)
   const [pageTexts, setPageTexts] = useState<Record<number, string>>({})
   const [pageDimensions, setPageDimensions] = useState<Record<number, PageDimensions>>({})
-  const [pagePositions, setPagePositions] = useState<Record<number, { word: string; x: number; y: number; width: number; height: number }[]>>({})
+  const [pagePositions, setPagePositions] = useState<Record<number, { word: string; x: number; y: number; width: number; height: number; isItem?: boolean }[]>>({})
   const [scrollProgress, setScrollProgress] = useState(0)
 
   const [selectedWord, setSelectedWord] = useState<{ word: string; x: number; y: number } | null>(null)
@@ -70,18 +70,32 @@ export function ReaderPage() {
 
   // Track time spent on each page (ignore sessions under 3 seconds)
   useEffect(() => {
+    const pageAtStart = currentPage
     pageEnterTime.current = Date.now()
     return () => {
       const timeSpent = Date.now() - pageEnterTime.current
-      const page = currentPageRef.current
-      if (page > 0 && timeSpent >= 3000) {
+      if (pageAtStart > 0 && timeSpent >= 3000) {
         pageTimesRef.current = {
           ...pageTimesRef.current,
-          [page]: (pageTimesRef.current[page] || 0) + timeSpent,
+          [pageAtStart]: (pageTimesRef.current[pageAtStart] || 0) + timeSpent,
         }
         setPageTimes({ ...pageTimesRef.current })
       }
     }
+  }, [currentPage])
+
+  // Live-update heatmap for current page (every 2 seconds)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const timeSpent = Date.now() - pageEnterTime.current
+      if (currentPage > 0 && timeSpent >= 3000) {
+        setPageTimes({
+          ...pageTimesRef.current,
+          [currentPage]: (pageTimesRef.current[currentPage] || 0) + timeSpent,
+        })
+      }
+    }, 2000)
+    return () => clearInterval(interval)
   }, [currentPage])
 
   // PDF loading
@@ -185,7 +199,7 @@ export function ReaderPage() {
     setPageDimensions((prev) => ({ ...prev, [pageNumber]: { width, height } }))
   }, [])
 
-  const handlePositionsExtracted = useCallback((pageNumber: number, positions: { word: string; x: number; y: number; width: number; height: number }[]) => {
+  const handlePositionsExtracted = useCallback((pageNumber: number, positions: { word: string; x: number; y: number; width: number; height: number; isItem?: boolean }[]) => {
     setPagePositions((prev) => ({ ...prev, [pageNumber]: positions }))
   }, [])
 
@@ -365,7 +379,7 @@ export function ReaderPage() {
                 {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => {
                   const isNearby = Math.abs(page - currentPage) <= VIRTUALIZATION_BUFFER
                   const dim = pageDimensions[page]
-                  const w = dim ? dim.width * scale : 612 * scale
+                  const w = dim ? dim.width : 612 * scale
 
                   return (
                     <div

@@ -8,6 +8,7 @@ interface WordPosition {
   y: number
   width: number
   height: number
+  isItem?: boolean
 }
 
 interface InlineRSVPProps {
@@ -16,8 +17,55 @@ interface InlineRSVPProps {
   onClose: () => void
 }
 
+// Unicode-aware word tokenization — works for English, Malayalam, Arabic, Hindi, etc.
+function tokenizeWords(text: string): string[] {
+  // Match word characters including Unicode letters/digits, or single punctuation
+  const tokens: string[] = []
+  const regex = /[\p{L}\p{N}]+/gu
+  let match
+  while ((match = regex.exec(text)) !== null) {
+    tokens.push(match[0])
+  }
+  return tokens
+}
+
+// Build a mapping from token index → position index + offset within item
+function buildWordPositionMap(
+  tokens: string[],
+  positions: WordPosition[]
+): Map<number, { posIdx: number; subOffset: number }> {
+  const map = new Map<number, { posIdx: number; subOffset: number }>()
+  let tokenIdx = 0
+
+  for (let posIdx = 0; posIdx < positions.length && tokenIdx < tokens.length; posIdx++) {
+    const pos = positions[posIdx]
+    // Split the item text into words using same tokenizer
+    const itemWords = tokenizeWords(pos.word)
+
+    for (let subIdx = 0; subIdx < itemWords.length && tokenIdx < tokens.length; subIdx++) {
+      // Try to match by content
+      if (itemWords[subIdx] === tokens[tokenIdx]) {
+        map.set(tokenIdx, { posIdx, subOffset: subIdx })
+        tokenIdx++
+      } else {
+        // Fallback: advance both — this handles cases where tokenizers differ slightly
+        map.set(tokenIdx, { posIdx, subOffset: subIdx })
+        tokenIdx++
+      }
+    }
+  }
+
+  // Map any remaining tokens to the last position
+  while (tokenIdx < tokens.length) {
+    map.set(tokenIdx, { posIdx: Math.max(0, positions.length - 1), subOffset: 0 })
+    tokenIdx++
+  }
+
+  return map
+}
+
 export function InlineRSVP({ text, positions, onClose }: InlineRSVPProps) {
-  const words = useMemo(() => text.split(/\s+/).filter((w) => w.length > 0), [text])
+  const tokens = useMemo(() => tokenizeWords(text), [text])
   const [currentIndex, setCurrentIndex] = useState(0)
   const [isPlaying, setIsPlaying] = useState(false)
   const [wpm, setWpm] = useState(300)
@@ -25,35 +73,43 @@ export function InlineRSVP({ text, positions, onClose }: InlineRSVPProps) {
   const intervalRef = useRef<ReturnType<typeof setInterval>>(undefined)
   const controlsTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined)
 
-  const currentWord = words[currentIndex] || ''
-  const progress = words.length > 0 ? (currentIndex / words.length) * 100 : 0
+  // Build position map
+  const wordPositionMap = useMemo(() => buildWordPositionMap(tokens, positions), [tokens, positions])
 
-  // Match current word to its position on the page
+  const currentWord = tokens[currentIndex] || ''
+  const progress = tokens.length > 0 ? (currentIndex / tokens.length) * 100 : 0
+
+  // Get position for current word
   const currentPosition = useMemo(() => {
-    if (positions.length === 0 || currentIndex >= words.length) return null
-    const target = words[currentIndex]
-    if (!target) return null
+    if (positions.length === 0 || currentIndex >= tokens.length) return null
+    const mapping = wordPositionMap.get(currentIndex)
+    if (!mapping) return null
 
-    // Exact match
-    let pos = positions.find((p, i) => p.word === target && Math.abs(i - currentIndex) < 5)
-    if (pos) return pos
+    const pos = positions[mapping.posIdx]
+    if (!pos) return null
 
-    // Fallback: find any occurrence of this word
-    pos = positions.find((p) => p.word === target)
-    if (pos) return pos
+    // If the item contains multiple words, estimate the sub-word position
+    if (pos.isItem && mapping.subOffset > 0) {
+      const itemWords = tokenizeWords(pos.word)
+      const totalWords = itemWords.length || 1
+      const wordWidth = pos.width / totalWords
+      return {
+        ...pos,
+        x: pos.x + wordWidth * mapping.subOffset,
+        width: wordWidth,
+      }
+    }
 
-    // Fallback: partial match
-    pos = positions.find((p) => p.word.includes(target.slice(0, 4)) || target.includes(p.word.slice(0, 4)))
-    return pos || null
-  }, [positions, currentIndex, words])
+    return pos
+  }, [positions, currentIndex, wordPositionMap, tokens.length])
 
   // Auto-play timer
   useEffect(() => {
-    if (isPlaying && currentIndex < words.length - 1) {
+    if (isPlaying && currentIndex < tokens.length - 1) {
       const msPerWord = (60 / wpm) * 1000
       intervalRef.current = setInterval(() => {
         setCurrentIndex((prev) => {
-          if (prev >= words.length - 1) {
+          if (prev >= tokens.length - 1) {
             setIsPlaying(false)
             return prev
           }
@@ -62,11 +118,11 @@ export function InlineRSVP({ text, positions, onClose }: InlineRSVPProps) {
       }, msPerWord)
     }
     return () => clearInterval(intervalRef.current)
-  }, [isPlaying, wpm, words.length, currentIndex])
+  }, [isPlaying, wpm, tokens.length, currentIndex])
 
   useEffect(() => {
-    if (currentIndex >= words.length - 1 && isPlaying) setIsPlaying(false)
-  }, [currentIndex, words.length, isPlaying])
+    if (currentIndex >= tokens.length - 1 && isPlaying) setIsPlaying(false)
+  }, [currentIndex, tokens.length, isPlaying])
 
   // Hide controls after inactivity
   useEffect(() => {
@@ -80,10 +136,10 @@ export function InlineRSVP({ text, positions, onClose }: InlineRSVPProps) {
   }, [showControls, isPlaying, currentIndex])
 
   const handlePlay = useCallback(() => {
-    if (currentIndex >= words.length - 1) setCurrentIndex(0)
+    if (currentIndex >= tokens.length - 1) setCurrentIndex(0)
     setIsPlaying(true)
     setShowControls(true)
-  }, [currentIndex, words.length])
+  }, [currentIndex, tokens.length])
 
   const handlePause = useCallback(() => {
     setIsPlaying(false)
@@ -98,42 +154,9 @@ export function InlineRSVP({ text, positions, onClose }: InlineRSVPProps) {
 
   const handleNext = useCallback(() => {
     setIsPlaying(false)
-    setCurrentIndex((p) => Math.min(words.length - 1, p + 1))
+    setCurrentIndex((p) => Math.min(tokens.length - 1, p + 1))
     setShowControls(true)
-  }, [words.length])
-
-  // Click on page to jump to nearest word
-  const handlePageClick = useCallback((e: MouseEvent) => {
-    if (positions.length === 0) return
-    const target = e.target as HTMLElement
-    // Only respond to clicks on the page background, not on controls
-    if (target.closest('[data-rsvp-controls]')) return
-
-    // Find nearest word position to click
-    const clickX = e.clientX / window.innerWidth
-    const clickY = e.clientY / window.innerHeight
-
-    let nearestIdx = 0
-    let nearestDist = Infinity
-    positions.forEach((pos, i) => {
-      const dx = pos.x + pos.width / 2 - clickX
-      const dy = pos.y + pos.height / 2 - clickY
-      const dist = Math.sqrt(dx * dx + dy * dy)
-      if (dist < nearestDist) {
-        nearestDist = dist
-        nearestIdx = i
-      }
-    })
-
-    // Map position index to word index
-    setCurrentIndex(Math.min(nearestIdx, words.length - 1))
-    setShowControls(true)
-  }, [positions, words.length])
-
-  useEffect(() => {
-    window.addEventListener('click', handlePageClick)
-    return () => window.removeEventListener('click', handlePageClick)
-  }, [handlePageClick])
+  }, [tokens.length])
 
   // Keyboard
   useEffect(() => {
@@ -169,10 +192,9 @@ export function InlineRSVP({ text, positions, onClose }: InlineRSVPProps) {
               left: `${currentPosition.x * 100}%`,
               top: `${currentPosition.y * 100}%`,
               width: `${Math.max(currentPosition.width * 100, 3)}%`,
-              height: `${currentPosition.height * 100}%`,
+              height: `${Math.max(currentPosition.height * 100, 2)}%`,
             }}
           >
-            {/* Highlight rectangle */}
             <div
               className="absolute -inset-[2px] rounded"
               style={{
@@ -197,12 +219,12 @@ export function InlineRSVP({ text, positions, onClose }: InlineRSVPProps) {
             className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[70]"
           >
             <div className="bg-[var(--color-surface-0)]/95 backdrop-blur-2xl border border-[var(--color-surface-3)] rounded-2xl shadow-[0_8px_40px_rgba(0,0,0,0.15)] overflow-hidden">
-              {/* Current word display */}
+              {/* Current word */}
               <div className="px-6 pt-3 pb-1">
                 <div className="text-center" style={{ fontFamily: 'var(--font-reading)' }}>
                   <span className="text-lg font-bold text-[var(--color-accent)]">{currentWord}</span>
                   <span className="text-xs text-[var(--color-text-tertiary)] ml-2">
-                    {currentIndex + 1}/{words.length}
+                    {currentIndex + 1}/{tokens.length}
                   </span>
                 </div>
               </div>
