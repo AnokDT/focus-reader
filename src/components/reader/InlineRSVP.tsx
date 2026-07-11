@@ -75,11 +75,15 @@ export function InlineRSVP({
   const [isTransitioning, setIsTransitioning] = useState(false)
   const intervalRef = useRef<ReturnType<typeof setInterval>>(undefined)
   const controlsTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined)
-  const [, forceUpdate] = useState(0)
   const prevTextRef = useRef(text)
   const autoPlayRef = useRef(autoPlay)
+  const scrollLockRef = useRef(false)
+  const scrollingRef = useRef(false)
+  const displayPageRef = useRef(pageNumber || 1)
 
   autoPlayRef.current = autoPlay
+  // Track display page separately to avoid flicker
+  if (pageNumber) displayPageRef.current = pageNumber
 
   const posMap = useMemo(() => buildPositionMap(tokens, wordPositions), [tokens, wordPositions])
 
@@ -89,6 +93,8 @@ export function InlineRSVP({
       prevTextRef.current = text
       setCurrentIndex(0)
       setIsTransitioning(false)
+      scrollLockRef.current = false
+      scrollingRef.current = false
       if (autoPlayRef.current) {
         setTimeout(() => setIsPlaying(true), 200)
       }
@@ -99,59 +105,60 @@ export function InlineRSVP({
   const currentPos = posMap.get(currentIndex)
   const progress = tokens.length > 0 ? (currentIndex / tokens.length) * 100 : 0
 
-  // Calculate screen position for the current word highlight
+  // Calculate highlight screen position — only when NOT scrolling
   const highlight = useMemo(() => {
     if (currentIndex >= tokens.length || !pageContainerRef?.current || !currentPos) return null
+    if (scrollingRef.current) return null // skip during scroll to avoid feedback loop
 
     const pageRect = pageContainerRef.current.getBoundingClientRect()
-    const scrollContainer = pageContainerRef.current.closest('[class*="overflow-auto"]') as HTMLElement | null
-    const scrollRect = scrollContainer?.getBoundingClientRect()
-    if (!scrollRect) return null
-
     return {
       screenX: pageRect.left + currentPos.x,
       screenY: pageRect.top + currentPos.y,
       width: currentPos.width,
       height: currentPos.height,
     }
-  }, [currentIndex, currentPos, pageContainerRef, forceUpdate])
+  }, [currentIndex, currentPos, pageContainerRef])
 
   // Auto-scroll: keep highlight in the upper 30-50% of the viewport
   useEffect(() => {
-    if (!highlight || isTransitioning) return
+    if (!highlight || isTransitioning || scrollLockRef.current) return
     const scrollContainer = pageContainerRef?.current?.closest('[class*="overflow-auto"]') as HTMLElement | null
     if (!scrollContainer) return
 
     const scrollRect = scrollContainer.getBoundingClientRect()
     const viewportHeight = scrollRect.height
-
-    // Where the highlight is on screen (relative to viewport)
     const highlightOnScreen = highlight.screenY - scrollRect.top
 
-    // Target zone: keep highlight between 30% and 50% of viewport
-    const targetMin = viewportHeight * 0.3
-    const targetMax = viewportHeight * 0.5
+    const targetZone = viewportHeight * 0.4 // keep at 40% from top
 
-    // If highlight is below target zone, scroll down
-    if (highlightOnScreen > targetMax) {
-      const scrollAmount = highlightOnScreen - (viewportHeight * 0.4)
+    // Only scroll if highlight is outside the comfortable zone
+    if (highlightOnScreen > viewportHeight * 0.55) {
+      // Too low — scroll down
+      const scrollAmount = highlightOnScreen - targetZone
+      scrollLockRef.current = true
+      scrollingRef.current = true
       scrollContainer.scrollBy({ top: scrollAmount, behavior: 'smooth' })
-    }
-    // If highlight is above target zone, scroll up
-    else if (highlightOnScreen < targetMin) {
-      const scrollAmount = highlightOnScreen - (viewportHeight * 0.4)
+      setTimeout(() => {
+        scrollLockRef.current = false
+        scrollingRef.current = false
+        forceUpdateRsvp((n) => n + 1)
+      }, 300)
+    } else if (highlightOnScreen < viewportHeight * 0.25) {
+      // Too high — scroll up
+      const scrollAmount = highlightOnScreen - targetZone
+      scrollLockRef.current = true
+      scrollingRef.current = true
       scrollContainer.scrollBy({ top: scrollAmount, behavior: 'smooth' })
+      setTimeout(() => {
+        scrollLockRef.current = false
+        scrollingRef.current = false
+        forceUpdateRsvp((n) => n + 1)
+      }, 300)
     }
   }, [highlight, isTransitioning, pageContainerRef])
 
-  // Recalculate on external scroll
-  useEffect(() => {
-    const scrollEl = pageContainerRef?.current?.closest('[class*="overflow-auto"]') as HTMLElement | null
-    if (!scrollEl) return
-    const onScroll = () => forceUpdate((n) => n + 1)
-    scrollEl.addEventListener('scroll', onScroll, { passive: true })
-    return () => scrollEl.removeEventListener('scroll', onScroll)
-  }, [pageContainerRef])
+  // Force re-render helper (replaces the old forceUpdate pattern)
+  const [, forceUpdateRsvp] = useState(0)
 
   // Auto-advance to next page
   const advanceToNextPage = useCallback(() => {
@@ -246,7 +253,7 @@ export function InlineRSVP({
 
   return (
     <>
-      {/* Highlight — follows the word, page scrolls to keep it in upper viewport */}
+      {/* Highlight — follows the word */}
       {highlight && !isTransitioning && (
         <div
           className="fixed pointer-events-none"
@@ -258,7 +265,6 @@ export function InlineRSVP({
             zIndex: 55,
           }}
         >
-          {/* Glow behind the word */}
           <div
             className="absolute -inset-[6px] rounded-lg"
             style={{
@@ -295,11 +301,9 @@ export function InlineRSVP({
                   <span className="text-[10px] text-[var(--color-text-tertiary)] tabular-nums">
                     {currentIndex + 1}/{tokens.length}
                   </span>
-                  {pageNumber && (
-                    <span className="text-[10px] text-[var(--color-text-tertiary)]">
-                      Page {pageNumber}
-                    </span>
-                  )}
+                  <span className="text-[10px] text-[var(--color-text-tertiary)]">
+                    Page {displayPageRef.current}
+                  </span>
                 </div>
               </div>
 

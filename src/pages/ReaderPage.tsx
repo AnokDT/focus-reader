@@ -74,6 +74,7 @@ export function ReaderPage() {
   const [selectedWord, setSelectedWord] = useState<{ word: string; x: number; y: number } | null>(null)
   const [showInlineRSVP, setShowInlineRSVP] = useState(false)
   const [rsvpAutoPlaying, setRsvpAutoPlaying] = useState(false)
+  const [rsvpDisplayPage, setRsvpDisplayPage] = useState(0)
   const [showVocabulary, setShowVocabulary] = useState(false)
   const [showHeatmap, setShowHeatmap] = useState(true)
   const [showInsights, setShowInsights] = useState(false)
@@ -293,13 +294,15 @@ export function ReaderPage() {
     }
     // Scroll to next page
     const nextPage = currentPage + 1
+    setRsvpDisplayPage(nextPage) // update display page immediately
     handlePageChange(nextPage)
     setRsvpAutoPlaying(true)
   }, [currentPage, totalPages, handlePageChange])
 
   const handleRSVPStart = useCallback(() => {
     setRsvpAutoPlaying(true)
-  }, [])
+    setRsvpDisplayPage(currentPage)
+  }, [currentPage])
 
   // Coordinate-based word detection
   const handlePageClick = useCallback((pageNumber: number, x: number, y: number) => {
@@ -754,7 +757,7 @@ export function ReaderPage() {
             wordPositions={currentPageWords}
             onClose={() => { setShowInlineRSVP(false); setRsvpAutoPlaying(false) }}
             pageContainerRef={currentPageContainerRef}
-            pageNumber={currentPage}
+            pageNumber={rsvpAutoPlaying ? rsvpDisplayPage : currentPage}
             totalPages={totalPages}
             onPageEnd={handleRSVPEnd}
             onPageStart={handleRSVPStart}
