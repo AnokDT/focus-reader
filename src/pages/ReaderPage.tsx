@@ -316,7 +316,6 @@ export function ReaderPage() {
 
     let closestWord: WordPos | null = null
     let closestDist = Infinity
-    let closestIndex = -1
 
     for (let i = 0; i < words.length; i++) {
       const w = words[i]
@@ -328,7 +327,6 @@ export function ReaderPage() {
         if (dist < closestDist) {
           closestDist = dist
           closestWord = w
-          closestIndex = i
         }
       }
     }
@@ -336,7 +334,21 @@ export function ReaderPage() {
     if (closestWord && closestWord.word.length >= 2) {
       const cleanWord = closestWord.word.replace(/[^\p{L}\p{N}]/gu, '').trim()
       if (cleanWord.length >= 2) {
-        setRsvpStartIndex(closestIndex)
+        // Find the token index that matches this word in the page text
+        const pageText = pageTexts[pageNumber] || ''
+        const tokenRegex = /[\p{L}\p{N}]+/gu
+        let tokenIdx = 0
+        let match: RegExpExecArray | null
+        let foundTokenIndex = 0
+        while ((match = tokenRegex.exec(pageText)) !== null) {
+          if (match[0] === closestWord.word) {
+            foundTokenIndex = tokenIdx
+            break
+          }
+          tokenIdx++
+        }
+
+        setRsvpStartIndex(foundTokenIndex)
         // If RSVP is not open, open it and start from this word
         if (!showInlineRSVPRef.current) {
           setShowInlineRSVP(true)
@@ -354,7 +366,7 @@ export function ReaderPage() {
         }
       }
     }
-  }, [pageWords])
+  }, [pageWords, pageTexts])
 
   // Annotation: text selection handler
   const handleTextSelection = useCallback(() => {

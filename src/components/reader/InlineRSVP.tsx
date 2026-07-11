@@ -78,7 +78,7 @@ export function InlineRSVP({
   const intervalRef = useRef<ReturnType<typeof setInterval>>(undefined)
   const controlsTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   const prevTextRef = useRef(text)
-  const prevStartIndexRef = useRef(startIndex)
+  const prevStartIndexRef = useRef(-1) // start at -1 so first startIndex triggers
   const autoPlayRef = useRef(autoPlay)
 
   autoPlayRef.current = autoPlay
@@ -90,6 +90,7 @@ export function InlineRSVP({
     if (prevTextRef.current !== text) {
       prevTextRef.current = text
       setCurrentIndex(0)
+      prevStartIndexRef.current = -1
       setIsTransitioning(false)
       if (autoPlayRef.current) {
         setTimeout(() => setIsPlaying(true), 300)
@@ -99,7 +100,7 @@ export function InlineRSVP({
 
   // When startIndex changes (user clicked a word), jump to that word
   useEffect(() => {
-    if (startIndex !== prevStartIndexRef.current && startIndex >= 0 && startIndex < tokens.length) {
+    if (startIndex >= 0 && startIndex < tokens.length && startIndex !== prevStartIndexRef.current) {
       prevStartIndexRef.current = startIndex
       setCurrentIndex(startIndex)
       // Auto-play from the clicked word
