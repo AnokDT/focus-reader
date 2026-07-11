@@ -758,6 +758,7 @@ export function ReaderPage() {
             totalPages={totalPages}
             onPageEnd={handleRSVPEnd}
             onPageStart={handleRSVPStart}
+            autoPlay={rsvpAutoPlaying}
           />
         )}
       </AnimatePresence>

@@ -12,7 +12,7 @@ interface InlineRSVPProps {
   totalPages?: number
   onPageEnd?: () => void
   onPageStart?: () => void
-  isPlayingExternal?: boolean
+  autoPlay?: boolean
 }
 
 function tokenize(text: string): string[] {
@@ -65,6 +65,7 @@ export function InlineRSVP({
   totalPages,
   onPageEnd,
   onPageStart,
+  autoPlay = false,
 }: InlineRSVPProps) {
   const tokens = useMemo(() => tokenize(text), [text])
   const [currentIndex, setCurrentIndex] = useState(0)
@@ -76,6 +77,9 @@ export function InlineRSVP({
   const controlsTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   const [, forceUpdate] = useState(0)
   const prevTextRef = useRef(text)
+  const autoPlayRef = useRef(autoPlay)
+
+  autoPlayRef.current = autoPlay
 
   const posMap = useMemo(() => buildPositionMap(tokens, wordPositions), [tokens, wordPositions])
 
@@ -85,42 +89,45 @@ export function InlineRSVP({
       prevTextRef.current = text
       setCurrentIndex(0)
       setIsTransitioning(false)
+      // Auto-play on new page if autoPlay is set
+      if (autoPlayRef.current) {
+        setTimeout(() => setIsPlaying(true), 200)
+      }
     }
   }, [text])
 
   const currentWord = tokens[currentIndex] || ''
   const progress = tokens.length > 0 ? (currentIndex / tokens.length) * 100 : 0
 
-  // Calculate screen position for the current word
-  const highlight = useMemo(() => {
-    if (currentIndex >= tokens.length || !pageContainerRef?.current) return null
+  // Scroll page to keep current word near the center highlight
+  useEffect(() => {
+    if (currentIndex >= tokens.length || isTransitioning) return
     const pos = posMap.get(currentIndex)
-    if (!pos) return null
+    if (!pos || !pageContainerRef?.current) return
+
+    const scrollContainer = pageContainerRef.current.closest('[class*="overflow-auto"]') as HTMLElement | null
+    if (!scrollContainer) return
 
     const pageRect = pageContainerRef.current.getBoundingClientRect()
-    const scrollContainer = pageContainerRef.current.closest('[class*="overflow-auto"]') as HTMLElement | null
-    const scrollRect = scrollContainer?.getBoundingClientRect()
+    const scrollRect = scrollContainer.getBoundingClientRect()
 
-    if (!scrollRect) return null
+    // Word's position relative to the scroll container viewport
+    const wordRelativeY = pageRect.top - scrollRect.top + pos.y - scrollContainer.scrollTop
 
-    const pageOffsetTop = pageRect.top - scrollRect.top + scrollContainer!.scrollTop
+    // Center of the scroll container
+    const containerCenter = scrollRect.height / 2
 
-    return {
-      screenX: pageRect.left + pos.x,
-      screenY: scrollRect.top + pageOffsetTop - scrollContainer!.scrollTop + pos.y,
-      width: pos.width,
-      height: pos.height,
+    // How far the word is from center
+    const offset = wordRelativeY - containerCenter
+
+    // Only scroll if the word is significantly off-center (>40px)
+    if (Math.abs(offset) > 40) {
+      scrollContainer.scrollBy({
+        top: offset * 0.6,
+        behavior: 'smooth',
+      })
     }
-  }, [currentIndex, posMap, pageContainerRef, tokens.length, forceUpdate])
-
-  // Recalculate on scroll
-  useEffect(() => {
-    const scrollEl = pageContainerRef?.current?.closest('[class*="overflow-auto"]') as HTMLElement | null
-    if (!scrollEl) return
-    const onScroll = () => forceUpdate((n) => n + 1)
-    scrollEl.addEventListener('scroll', onScroll, { passive: true })
-    return () => scrollEl.removeEventListener('scroll', onScroll)
-  }, [pageContainerRef])
+  }, [currentIndex, posMap, pageContainerRef, isTransitioning])
 
   // Auto-advance to next page
   const advanceToNextPage = useCallback(() => {
@@ -129,7 +136,6 @@ export function InlineRSVP({
       return
     }
     setIsTransitioning(true)
-    setIsPlaying(false)
     onPageEnd()
   }, [onPageEnd])
 
@@ -139,7 +145,6 @@ export function InlineRSVP({
       intervalRef.current = setInterval(() => {
         setCurrentIndex((prev) => {
           if (prev >= tokens.length - 1) {
-            // Reached end of page — auto-advance
             clearInterval(intervalRef.current)
             setTimeout(() => advanceToNextPage(), 100)
             return prev
@@ -150,12 +155,6 @@ export function InlineRSVP({
     }
     return () => clearInterval(intervalRef.current)
   }, [isPlaying, wpm, tokens.length, isTransitioning, advanceToNextPage])
-
-  useEffect(() => {
-    if (currentIndex >= tokens.length - 1 && isPlaying && !isTransitioning) {
-      // Don't stop here — the interval handler will advance
-    }
-  }, [currentIndex, tokens.length, isPlaying, isTransitioning])
 
   // Hide controls after inactivity
   useEffect(() => {
@@ -223,26 +222,37 @@ export function InlineRSVP({
 
   return (
     <>
-      {/* Word highlight — positioned at actual screen coordinates */}
-      {highlight && !isTransitioning && (
+      {/* CENTERED highlight box — fixed at screen center, page scrolls under it */}
+      {!isTransitioning && (
         <div
-          className="fixed pointer-events-none"
-          style={{
-            left: highlight.screenX,
-            top: highlight.screenY,
-            width: Math.max(highlight.width, 30),
-            height: Math.max(highlight.height, 14),
-            zIndex: 55,
-          }}
+          className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none"
+          style={{ zIndex: 55 }}
         >
+          {/* Glow background */}
           <div
-            className="absolute -inset-[3px] rounded-md"
+            className="absolute -inset-4 rounded-2xl"
             style={{
-              background: 'rgba(var(--color-accent-rgb, 59, 130, 246), 0.3)',
-              border: '2px solid var(--color-accent)',
-              boxShadow: '0 0 24px rgba(var(--color-accent-rgb, 59, 130, 246), 0.35), 0 0 48px rgba(var(--color-accent-rgb, 59, 130, 246), 0.15)',
+              background: 'rgba(0, 0, 0, 0.65)',
+              backdropFilter: 'blur(2px)',
             }}
           />
+          {/* Highlight box */}
+          <div
+            className="relative px-6 py-3 rounded-xl min-w-[120px]"
+            style={{
+              background: 'rgba(var(--color-accent-rgb, 59, 130, 246), 0.15)',
+              border: '2px solid var(--color-accent)',
+              boxShadow: '0 0 40px rgba(var(--color-accent-rgb, 59, 130, 246), 0.4), 0 0 80px rgba(var(--color-accent-rgb, 59, 130, 246), 0.15)',
+            }}
+          >
+            <div className="text-center" style={{ fontFamily: 'var(--font-reading)' }}>
+              <span className="text-2xl font-bold text-[var(--color-accent)]">
+                {currentWord}
+              </span>
+            </div>
+            {/* Center line guide */}
+            <div className="absolute left-4 right-4 top-1/2 -translate-y-1/2 h-px bg-[var(--color-accent)] opacity-20" />
+          </div>
         </div>
       )}
 
@@ -258,31 +268,24 @@ export function InlineRSVP({
             className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[70]"
           >
             <div className="bg-[var(--color-surface-0)]/95 backdrop-blur-2xl border border-[var(--color-surface-3)] rounded-2xl shadow-[0_8px_40px_rgba(0,0,0,0.15)] overflow-hidden">
-              {/* Current word */}
-              <div className="px-6 pt-3 pb-1">
-                <div className="text-center" style={{ fontFamily: 'var(--font-reading)' }}>
-                  <span className="text-lg font-bold text-[var(--color-accent)]">
-                    {isTransitioning ? 'Loading next page...' : currentWord}
-                  </span>
-                  <span className="text-xs text-[var(--color-text-tertiary)] ml-2">
-                    {currentIndex + 1}/{tokens.length}
-                  </span>
-                  {pageNumber && (
-                    <span className="text-xs text-[var(--color-text-tertiary)] ml-2">
-                      · Page {pageNumber}
-                    </span>
-                  )}
-                </div>
-              </div>
-
               {/* Progress */}
-              <div className="px-5">
+              <div className="px-5 pt-3">
                 <div className="relative h-1 bg-[var(--color-surface-3)] rounded-full overflow-hidden">
                   <motion.div
                     className="absolute inset-y-0 left-0 bg-gradient-to-r from-[var(--color-accent)] to-purple-500 rounded-full"
                     animate={{ width: `${progress}%` }}
                     transition={{ duration: 0.1 }}
                   />
+                </div>
+                <div className="flex items-center justify-between mt-1.5">
+                  <span className="text-[10px] text-[var(--color-text-tertiary)] tabular-nums">
+                    {currentIndex + 1}/{tokens.length}
+                  </span>
+                  {pageNumber && (
+                    <span className="text-[10px] text-[var(--color-text-tertiary)]">
+                      Page {pageNumber}
+                    </span>
+                  )}
                 </div>
               </div>
 
