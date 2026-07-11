@@ -319,8 +319,9 @@ export function ReaderPage() {
 
     for (let i = 0; i < words.length; i++) {
       const w = words[i]
-      const inX = x >= w.x - 5 && x <= w.x + w.width + 5
-      const inY = y >= w.y - 5 && y <= w.y + w.height + 5
+      const tolerance = 10
+      const inX = x >= w.x - tolerance && x <= w.x + w.width + tolerance
+      const inY = y >= w.y - tolerance && y <= w.y + w.height + tolerance
 
       if (inX && inY) {
         const dist = Math.abs(x - (w.x + w.width / 2)) + Math.abs(y - (w.y + w.height / 2))

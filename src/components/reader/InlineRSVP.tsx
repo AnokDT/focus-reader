@@ -248,17 +248,17 @@ export function InlineRSVP({
     })
   }, [tokens.length, posMap, pageContainerRef])
 
-  // Keyboard
+  // Keyboard — use stopImmediatePropagation to prevent ReaderPage from also handling
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-      if (e.key === ' ') { e.preventDefault(); isPlaying ? handlePause() : handlePlay() }
-      if (e.key === 'ArrowLeft') handlePrevWord()
-      if (e.key === 'ArrowRight') handleNextWord()
-      if (e.key === 'n' || e.key === 'Enter') advanceToNextPage()
+      if (e.key === 'Escape') { e.stopImmediatePropagation(); onClose(); return }
+      if (e.key === ' ') { e.preventDefault(); e.stopImmediatePropagation(); isPlaying ? handlePause() : handlePlay(); return }
+      if (e.key === 'ArrowLeft') { e.stopImmediatePropagation(); handlePrevWord(); return }
+      if (e.key === 'ArrowRight') { e.stopImmediatePropagation(); handleNextWord(); return }
+      if (e.key === 'n' || e.key === 'Enter') { e.stopImmediatePropagation(); advanceToNextPage(); return }
     }
-    window.addEventListener('keydown', handleKey)
-    return () => window.removeEventListener('keydown', handleKey)
+    window.addEventListener('keydown', handleKey, true) // use capture phase
+    return () => window.removeEventListener('keydown', handleKey, true)
   }, [isPlaying, onClose, handlePlay, handlePause, handlePrevWord, handleNextWord, advanceToNextPage])
 
   // Show controls on mouse move
@@ -269,6 +269,9 @@ export function InlineRSVP({
   }, [])
 
   const hasNextPage = (pageNumber || 0) < (totalPages || 0)
+
+  // Position control bar at top or bottom based on highlight position
+  const controlsAtTop = highlight ? highlight.y > window.innerHeight * 0.6 : false
 
   return (
     <>
@@ -295,16 +298,16 @@ export function InlineRSVP({
         </div>
       )}
 
-      {/* Control bar */}
+      {/* Control bar — position at top when word is near bottom */}
       <AnimatePresence>
         {showControls && (
           <motion.div
             data-rsvp-controls
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: controlsAtTop ? -20 : 20 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 20 }}
+            exit={{ opacity: 0, y: controlsAtTop ? -20 : 20 }}
             transition={{ duration: 0.2 }}
-            className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[70]"
+            className={`fixed left-1/2 -translate-x-1/2 z-[70] ${controlsAtTop ? 'top-16' : 'bottom-20'}`}
           >
             <div className="bg-[var(--color-surface-0)]/95 backdrop-blur-2xl border border-[var(--color-surface-3)] rounded-2xl shadow-[0_8px_40px_rgba(0,0,0,0.15)] overflow-hidden">
               {/* Current word display */}
