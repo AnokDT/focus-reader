@@ -1,6 +1,5 @@
 import { useRef, useEffect, useCallback, useState } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
-import { ocrService } from '@/services/ocrService'
 
 interface PDFPageRendererProps {
   pdf: pdfjsLib.PDFDocumentProxy
@@ -8,7 +7,6 @@ interface PDFPageRendererProps {
   scale: number
   isVisible: boolean
   isDarkMode?: boolean
-  selectMode?: boolean
   onTextExtracted?: (pageNumber: number, text: string) => void
   onDimensionsReady?: (pageNumber: number, width: number, height: number) => void
   onWordSelect?: (word: string, x: number, y: number) => void
@@ -20,7 +18,6 @@ export function PDFPageRenderer({
   scale,
   isVisible,
   isDarkMode = false,
-  selectMode = false,
   onTextExtracted,
   onDimensionsReady,
   onWordSelect,
@@ -60,36 +57,19 @@ export function PDFPageRenderer({
         renderTaskRef.current.cancel()
       }
 
-      renderTaskRef.current = page.render({
-        canvas,
-        viewport,
-      })
-
+      renderTaskRef.current = page.render({ canvas, viewport })
       await renderTaskRef.current.promise
       setRendered(true)
       setLoading(false)
 
-      // Extract text content for search and RSVP
+      // Extract text for search and copy
       if (onTextExtracted) {
         const content = await page.getTextContent()
-        let text = content.items.map((item: any) => item.str).join(' ')
-
-        // If text is sparse/empty (image-based PDF), try OCR
-        if (text.trim().length < 20) {
-          try {
-            const ocrResult = await ocrService.recognizePDFPage(pdf, pageNumber, 2)
-            if (ocrResult.text.trim().length > text.trim().length) {
-              text = ocrResult.text
-            }
-          } catch {
-            // OCR failed, use extracted text as-is
-          }
-        }
-
+        const text = content.items.map((item: any) => item.str).join(' ')
         onTextExtracted(pageNumber, text)
       }
 
-      // Build text layer for word selection (only when selectMode is active)
+      // Build text layer — ALWAYS interactive for text selection
       if (textLayerRef.current) {
         const content = await page.getTextContent()
         const textLayer = textLayerRef.current
@@ -97,34 +77,40 @@ export function PDFPageRenderer({
 
         content.items.forEach((item: any) => {
           if (!item.str || !item.transform) return
-          const [x, y, , , w, h] = item.transform
-          const left = (x / viewport.width) * 100
-          const top = ((viewport.height - y - h) / viewport.height) * 100
-          const width = (w / viewport.width) * 100
-          const height = (h / viewport.height) * 100
+          const [sx, sy, , , tx, ty] = item.transform
+          const fontHeight = sy || sx
+
+          // Position relative to viewport
+          const left = (tx / viewport.width) * 100
+          const top = ((viewport.height - ty) / viewport.height) * 100
+          const width = ((item.width || item.str.length * fontHeight * 0.5) / viewport.width) * 100
+          const height = (fontHeight / viewport.height) * 100
 
           const span = window.document.createElement('span')
           span.textContent = item.str
+          span.setAttribute('data-text', item.str)
           span.style.position = 'absolute'
           span.style.left = `${left}%`
           span.style.top = `${top}%`
           span.style.width = `${width}%`
           span.style.height = `${height}%`
-          span.style.fontSize = `${h * 0.8}px`
+          span.style.fontSize = `${fontHeight * 0.9}px`
           span.style.fontFamily = 'sans-serif'
-          span.style.color = 'transparent'
-          span.style.cursor = selectMode ? 'text' : 'default'
-          span.style.lineHeight = '1'
+          span.style.color = 'rgba(0,0,0,0.001)'
+          span.style.cursor = 'text'
+          span.style.lineHeight = '1.1'
           span.style.whiteSpace = 'pre'
-          span.style.userSelect = selectMode ? 'text' : 'none'
+          span.style.userSelect = 'text'
+          span.style.webkitUserSelect = 'text'
 
-          span.addEventListener('mouseup', () => {
-            if (!selectMode || !onWordSelect) return
+          // Word selection via double-click or click
+          span.addEventListener('mouseup', (e: MouseEvent) => {
+            e.stopPropagation()
             const selection = window.getSelection()
             const selectedText = selection?.toString().trim() || ''
-            if (selectedText.length >= 2 && selectedText.length <= 30 && !selectedText.includes(' ')) {
+            if (selectedText.length >= 2 && onWordSelect) {
               const rect = span.getBoundingClientRect()
-              onWordSelect(selectedText, rect.left, rect.bottom)
+              onWordSelect(selectedText, rect.left + rect.width / 2, rect.bottom + 8)
             }
           })
 
@@ -137,7 +123,7 @@ export function PDFPageRenderer({
       }
       setLoading(false)
     }
-  }, [pdf, pageNumber, scale, isVisible, rendered, selectMode, onTextExtracted, onDimensionsReady, onWordSelect])
+  }, [pdf, pageNumber, scale, isVisible, rendered, onTextExtracted, onDimensionsReady, onWordSelect])
 
   useEffect(() => {
     if (isVisible && !rendered) {
@@ -154,19 +140,24 @@ export function PDFPageRenderer({
   }, [])
 
   return (
-    <div className={`relative ${isDarkMode ? 'bg-[#1a1a2e]' : 'bg-white'}`} style={{ width: pageWidth || 'auto', height: pageHeight || 'auto' }}>
+    <div
+      className={`relative ${isDarkMode ? 'bg-[#1a1a2e]' : 'bg-white'}`}
+      style={{ width: pageWidth || 'auto', height: pageHeight || 'auto' }}
+    >
       <canvas
         ref={canvasRef}
         className={`block ${isDarkMode ? 'pdf-canvas-dark' : ''}`}
         style={{ imageRendering: 'auto' }}
       />
-      {/* Text layer — only interactive in selectMode, always pointer-events:none to prevent bleeding */}
+
+      {/* Text layer — ALWAYS interactive for text selection */}
       <div
         ref={textLayerRef}
         className="absolute inset-0"
         style={{
-          pointerEvents: selectMode ? 'auto' : 'none',
-          userSelect: selectMode ? 'text' : 'none',
+          pointerEvents: 'auto',
+          userSelect: 'text',
+          WebkitUserSelect: 'text',
         }}
       />
 

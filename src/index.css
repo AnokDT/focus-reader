@@ -160,5 +160,21 @@ input[type="number"] {
 
 /* Word selection highlight */
 [data-page-number] ::selection {
-  background-color: rgba(59, 130, 246, 0.3);
+  background-color: rgba(59, 130, 246, 0.35);
+  color: inherit;
+}
+[data-page-number] ::-moz-selection {
+  background-color: rgba(59, 130, 246, 0.35);
+  color: inherit;
+}
+
+/* Text layer spans — invisible but selectable */
+[data-page-number] span[data-text] {
+  color: rgba(0, 0, 0, 0.001) !important;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  cursor: text;
+}
+[data-page-number] span[data-text]:hover {
+  background-color: rgba(59, 130, 246, 0.08);
 }

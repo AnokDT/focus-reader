@@ -55,7 +55,6 @@ export function ReaderPage() {
   const [showVocabulary, setShowVocabulary] = useState(false)
   const [showHeatmap, setShowHeatmap] = useState(true)
   const [showInsights, setShowInsights] = useState(false)
-  const [selectMode, setSelectMode] = useState(false)
   const [pageTimes, setPageTimes] = useState<Record<number, number>>({})
 
   const containerRef = useRef<HTMLDivElement>(null)
@@ -242,7 +241,6 @@ export function ReaderPage() {
         case 'v': if (!e.ctrlKey && !e.metaKey) setShowVocabulary((v) => !v); break
         case 'i': if (!e.ctrlKey && !e.metaKey) setShowInsights((v) => !v); break
         case 'h': if (!e.ctrlKey && !e.metaKey) setShowHeatmap((v) => !v); break
-        case 's': if (!e.ctrlKey && !e.metaKey) setSelectMode((v) => !v); break
       }
     }
     window.addEventListener('keydown', handleKeyDown)
@@ -304,8 +302,6 @@ export function ReaderPage() {
         onToggleRSVP={() => currentPageText.length > 0 && setShowInlineRSVP(true)}
         onToggleVocabulary={() => setShowVocabulary(true)}
         onToggleInsights={() => setShowInsights(true)}
-        selectMode={selectMode}
-        onToggleSelectMode={() => setSelectMode((v) => !v)}
       />
 
       <div className="flex-1 flex overflow-hidden relative">
@@ -391,7 +387,6 @@ export function ReaderPage() {
                             scale={scale}
                             isVisible={true}
                             isDarkMode={isDarkMode}
-                            selectMode={selectMode}
                             onTextExtracted={handleTextExtracted}
                             onDimensionsReady={handleDimensionsReady}
                             onWordSelect={handleWordSelect}
@@ -432,29 +427,12 @@ export function ReaderPage() {
             <ReadingTimer />
 
             <div className="flex items-center gap-3 text-xs text-[var(--color-text-tertiary)]">
-              {selectMode && (
-                <span className="flex items-center gap-1.5 text-emerald-500">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  Select mode
-                </span>
-              )}
               {focus.enabled && focus.autoScroll && (
                 <span className="flex items-center gap-1.5 text-[var(--color-accent)]">
                   <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-accent)] animate-pulse" />
                   Auto-scroll
                 </span>
               )}
-              <button
-                onClick={() => {
-                  if (currentPageText) {
-                    navigator.clipboard.writeText(currentPageText)
-                  }
-                }}
-                className="px-2 py-0.5 rounded text-[10px] hover:bg-[var(--color-surface-2)] transition-colors"
-                title="Copy page text"
-              >
-                Copy text
-              </button>
               <span className="tabular-nums">{Math.round(scale * 100)}%</span>
             </div>
           </div>
@@ -475,16 +453,10 @@ export function ReaderPage() {
         )}
       </AnimatePresence>
 
-      {/* Inline RSVP — ON the page */}
+      {/* Inline RSVP speed reader */}
       <AnimatePresence>
-        {showInlineRSVP && currentPageText.length > 0 && pdf && (
-          <InlineRSVP
-            text={currentPageText}
-            pdf={pdf}
-            pageNumber={currentPage}
-            scale={scale}
-            onClose={() => setShowInlineRSVP(false)}
-          />
+        {showInlineRSVP && currentPageText.length > 0 && (
+          <InlineRSVP text={currentPageText} onClose={() => setShowInlineRSVP(false)} />
         )}
       </AnimatePresence>
 
