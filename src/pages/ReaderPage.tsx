@@ -76,6 +76,7 @@ export function ReaderPage() {
   const [rsvpAutoPlaying, setRsvpAutoPlaying] = useState(false)
   const [rsvpDisplayPage, setRsvpDisplayPage] = useState(0)
   const [rsvpStartIndex, setRsvpStartIndex] = useState(0)
+  const showInlineRSVPRef = useRef(false)
   const [showVocabulary, setShowVocabulary] = useState(false)
   const [showHeatmap, setShowHeatmap] = useState(true)
   const [showInsights, setShowInsights] = useState(false)
@@ -106,6 +107,9 @@ export function ReaderPage() {
   const hasBookmark = useBookmarkStore((s) => s.hasBookmark)
   const toggleBookmark = useBookmarkStore((s) => s.toggleBookmark)
   const isCurrentPageBookmarked = doc ? hasBookmark(doc.id, currentPage) : false
+
+  // Keep ref in sync with state
+  useEffect(() => { showInlineRSVPRef.current = showInlineRSVP }, [showInlineRSVP])
 
   const { downloadMarkdown } = useExportNotes({
     documentId: doc?.id || '',
@@ -334,9 +338,8 @@ export function ReaderPage() {
       if (cleanWord.length >= 2) {
         setRsvpStartIndex(closestIndex)
         // If RSVP is not open, open it and start from this word
-        if (!showInlineRSVP) {
+        if (!showInlineRSVPRef.current) {
           setShowInlineRSVP(true)
-          // Don't show WordPopup — start reading instead
           return
         }
         // If RSVP is already open, show dictionary popup
@@ -453,6 +456,7 @@ export function ReaderPage() {
         return
       }
 
+      // When RSVP is open, let it handle its own keys
       if (showInlineRSVP) return
 
       switch (e.key) {
