@@ -10,6 +10,18 @@ interface PDFPageRendererProps {
   onTextExtracted?: (pageNumber: number, text: string) => void
   onDimensionsReady?: (pageNumber: number, width: number, height: number) => void
   onWordSelect?: (word: string, x: number, y: number) => void
+  onPositionExtracted?: (pageNumber: number, positions: { word: string; x: number; y: number; width: number; height: number }[]) => void
+}
+
+function applyTransform(t1: number[], t2: number[]): number[] {
+  return [
+    t1[0] * t2[0] + t1[2] * t2[1],
+    t1[1] * t2[0] + t1[3] * t2[1],
+    t1[0] * t2[2] + t1[2] * t2[3],
+    t1[1] * t2[2] + t1[3] * t2[3],
+    t1[0] * t2[4] + t1[2] * t2[5] + t1[4],
+    t1[1] * t2[4] + t1[3] * t2[5] + t1[5],
+  ]
 }
 
 export function PDFPageRenderer({
@@ -21,6 +33,7 @@ export function PDFPageRenderer({
   onTextExtracted,
   onDimensionsReady,
   onWordSelect,
+  onPositionExtracted,
 }: PDFPageRendererProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const textLayerRef = useRef<HTMLDivElement>(null)
@@ -37,6 +50,7 @@ export function PDFPageRenderer({
       setLoading(true)
       const page = await pdf.getPage(pageNumber)
       const viewport = page.getViewport({ scale })
+      const baseViewport = page.getViewport({ scale: 1 })
       const dpr = window.devicePixelRatio || 1
 
       const canvas = canvasRef.current
@@ -62,60 +76,92 @@ export function PDFPageRenderer({
       setRendered(true)
       setLoading(false)
 
-      // Extract text for search and copy
-      if (onTextExtracted) {
+      // Extract text
+      if (onTextExtracted || onPositionExtracted || textLayerRef.current) {
         const content = await page.getTextContent()
         const text = content.items.map((item: any) => item.str).join(' ')
-        onTextExtracted(pageNumber, text)
-      }
+        onTextExtracted?.(pageNumber, text)
 
-      // Build text layer — ALWAYS interactive for text selection
-      if (textLayerRef.current) {
-        const content = await page.getTextContent()
-        const textLayer = textLayerRef.current
-        textLayer.innerHTML = ''
+        // Build text layer with CORRECT coordinate transform
+        if (textLayerRef.current) {
+          const textLayer = textLayerRef.current
+          textLayer.innerHTML = ''
+          const positions: { word: string; x: number; y: number; width: number; height: number }[] = []
 
-        content.items.forEach((item: any) => {
-          if (!item.str || !item.transform) return
-          const [sx, sy, , , tx, ty] = item.transform
-          const fontHeight = sy || sx
+          content.items.forEach((item: any) => {
+            if (!item.str || !item.transform) return
 
-          // Position relative to viewport
-          const left = (tx / viewport.width) * 100
-          const top = ((viewport.height - ty) / viewport.height) * 100
-          const width = ((item.width || item.str.length * fontHeight * 0.5) / viewport.width) * 100
-          const height = (fontHeight / viewport.height) * 100
+            // Apply viewport transform to get screen coordinates
+            const tx = applyTransform(viewport.transform, item.transform)
+            // tx[4] = screen X, tx[5] = screen Y (from top), tx[0] = horizontal scale, tx[3] = vertical scale
 
-          const span = window.document.createElement('span')
-          span.textContent = item.str
-          span.setAttribute('data-text', item.str)
-          span.style.position = 'absolute'
-          span.style.left = `${left}%`
-          span.style.top = `${top}%`
-          span.style.width = `${width}%`
-          span.style.height = `${height}%`
-          span.style.fontSize = `${fontHeight * 0.9}px`
-          span.style.fontFamily = 'sans-serif'
-          span.style.color = 'rgba(0,0,0,0.001)'
-          span.style.cursor = 'text'
-          span.style.lineHeight = '1.1'
-          span.style.whiteSpace = 'pre'
-          span.style.userSelect = 'text'
-          span.style.webkitUserSelect = 'text'
+            const screenX = tx[4]
+            const screenY = tx[5]
+            const fontHeight = Math.abs(tx[3]) || Math.abs(tx[0])
+            const itemWidth = item.width * scale || item.str.length * fontHeight * 0.5
 
-          // Word selection via double-click or click
-          span.addEventListener('mouseup', (e: MouseEvent) => {
-            e.stopPropagation()
-            const selection = window.getSelection()
-            const selectedText = selection?.toString().trim() || ''
-            if (selectedText.length >= 2 && onWordSelect) {
-              const rect = span.getBoundingClientRect()
-              onWordSelect(selectedText, rect.left + rect.width / 2, rect.bottom + 8)
+            const left = (screenX / viewport.width) * 100
+            const top = (screenY / viewport.height) * 100
+            const widthPct = (itemWidth / viewport.width) * 100
+            const heightPct = (fontHeight / viewport.height) * 100
+
+            const span = window.document.createElement('span')
+            span.textContent = item.str
+            span.setAttribute('data-text', item.str)
+            span.style.position = 'absolute'
+            span.style.left = `${left}%`
+            span.style.top = `${top}%`
+            span.style.width = `${widthPct}%`
+            span.style.height = `${heightPct}%`
+            span.style.fontSize = `${fontHeight * 0.9}px`
+            span.style.fontFamily = 'sans-serif'
+            span.style.lineHeight = '1.1'
+            span.style.whiteSpace = 'pre'
+            span.style.color = 'transparent'
+            span.style.cursor = 'text'
+            span.style.userSelect = 'text'
+            span.style.webkitUserSelect = 'text'
+            span.style.pointerEvents = 'auto'
+
+            // Collect word positions for RSVP
+            if (onPositionExtracted) {
+              const words = item.str.split(/(\s+)/)
+              let xOffset = 0
+              const charWidth = itemWidth / Math.max(item.str.length, 1)
+
+              words.forEach((word: string) => {
+                if (word.trim().length === 0) {
+                  xOffset += word.length * charWidth
+                  return
+                }
+                const wordWidth = word.length * charWidth
+                positions.push({
+                  word,
+                  x: (screenX + xOffset) / viewport.width,
+                  y: screenY / viewport.height,
+                  width: wordWidth / viewport.width,
+                  height: fontHeight / viewport.height,
+                })
+                xOffset += wordWidth
+              })
             }
+
+            // Word selection
+            span.addEventListener('mouseup', (e: MouseEvent) => {
+              e.stopPropagation()
+              const selection = window.getSelection()
+              const selectedText = selection?.toString().trim() || ''
+              if (selectedText.length >= 2 && onWordSelect) {
+                const rect = span.getBoundingClientRect()
+                onWordSelect(selectedText, rect.left + rect.width / 2, rect.bottom + 8)
+              }
+            })
+
+            textLayer.appendChild(span)
           })
 
-          textLayer.appendChild(span)
-        })
+          onPositionExtracted?.(pageNumber, positions)
+        }
       }
     } catch (err: any) {
       if (err?.name !== 'RenderingCancelledException') {
@@ -123,7 +169,7 @@ export function PDFPageRenderer({
       }
       setLoading(false)
     }
-  }, [pdf, pageNumber, scale, isVisible, rendered, onTextExtracted, onDimensionsReady, onWordSelect])
+  }, [pdf, pageNumber, scale, isVisible, rendered, onTextExtracted, onDimensionsReady, onWordSelect, onPositionExtracted])
 
   useEffect(() => {
     if (isVisible && !rendered) {
@@ -141,7 +187,7 @@ export function PDFPageRenderer({
 
   return (
     <div
-      className={`relative ${isDarkMode ? 'bg-[#1a1a2e]' : 'bg-white'}`}
+      className={`relative overflow-hidden ${isDarkMode ? 'bg-[#1a1a2e]' : 'bg-white'}`}
       style={{ width: pageWidth || 'auto', height: pageHeight || 'auto' }}
     >
       <canvas
@@ -150,10 +196,10 @@ export function PDFPageRenderer({
         style={{ imageRendering: 'auto' }}
       />
 
-      {/* Text layer — ALWAYS interactive for text selection */}
+      {/* Text layer — invisible but selectable, CORRECTLY positioned */}
       <div
         ref={textLayerRef}
-        className="absolute inset-0"
+        className="absolute inset-0 overflow-hidden"
         style={{
           pointerEvents: 'auto',
           userSelect: 'text',

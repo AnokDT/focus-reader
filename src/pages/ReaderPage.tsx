@@ -48,6 +48,7 @@ export function ReaderPage() {
   const [currentSearchIndex, setCurrentSearchIndex] = useState(0)
   const [pageTexts, setPageTexts] = useState<Record<number, string>>({})
   const [pageDimensions, setPageDimensions] = useState<Record<number, PageDimensions>>({})
+  const [pagePositions, setPagePositions] = useState<Record<number, { word: string; x: number; y: number; width: number; height: number }[]>>({})
   const [scrollProgress, setScrollProgress] = useState(0)
 
   const [selectedWord, setSelectedWord] = useState<{ word: string; x: number; y: number } | null>(null)
@@ -67,13 +68,13 @@ export function ReaderPage() {
 
   const isDarkMode = theme === 'dark'
 
-  // Track time spent on each page
+  // Track time spent on each page (ignore sessions under 3 seconds)
   useEffect(() => {
     pageEnterTime.current = Date.now()
     return () => {
       const timeSpent = Date.now() - pageEnterTime.current
       const page = currentPageRef.current
-      if (page > 0) {
+      if (page > 0 && timeSpent >= 3000) {
         pageTimesRef.current = {
           ...pageTimesRef.current,
           [page]: (pageTimesRef.current[page] || 0) + timeSpent,
@@ -182,6 +183,10 @@ export function ReaderPage() {
 
   const handleDimensionsReady = useCallback((pageNumber: number, width: number, height: number) => {
     setPageDimensions((prev) => ({ ...prev, [pageNumber]: { width, height } }))
+  }, [])
+
+  const handlePositionsExtracted = useCallback((pageNumber: number, positions: { word: string; x: number; y: number; width: number; height: number }[]) => {
+    setPagePositions((prev) => ({ ...prev, [pageNumber]: positions }))
   }, [])
 
   const handleWordSelect = useCallback((word: string, x: number, y: number) => {
@@ -390,6 +395,7 @@ export function ReaderPage() {
                             onTextExtracted={handleTextExtracted}
                             onDimensionsReady={handleDimensionsReady}
                             onWordSelect={handleWordSelect}
+                            onPositionExtracted={handlePositionsExtracted}
                           />
                         ) : (
                           <div style={{ width: 612 * scale, height: 792 * scale }} className={isDarkMode ? 'bg-[#1a1a2e]' : 'bg-[var(--color-surface-2)]'} />
@@ -456,7 +462,11 @@ export function ReaderPage() {
       {/* Inline RSVP speed reader */}
       <AnimatePresence>
         {showInlineRSVP && currentPageText.length > 0 && (
-          <InlineRSVP text={currentPageText} onClose={() => setShowInlineRSVP(false)} />
+          <InlineRSVP
+            text={currentPageText}
+            positions={pagePositions[currentPage] || []}
+            onClose={() => setShowInlineRSVP(false)}
+          />
         )}
       </AnimatePresence>
 
