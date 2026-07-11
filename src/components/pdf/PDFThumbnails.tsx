@@ -1,6 +1,7 @@
 import { useMemo, useRef, useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import type * as pdfjsLib from 'pdfjs-dist'
+import { useSettingsStore } from '@/stores/settingsStore'
 
 interface PDFThumbnailProps {
   pdf: pdfjsLib.PDFDocumentProxy
@@ -12,6 +13,7 @@ interface PDFThumbnailProps {
 function PDFThumbnail({ pdf, pageNumber, isActive, onClick }: PDFThumbnailProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [loaded, setLoaded] = useState(false)
+  const isDarkMode = useSettingsStore((s) => s.theme) === 'dark'
 
   useEffect(() => {
     let cancelled = false
@@ -46,7 +48,7 @@ function PDFThumbnail({ pdf, pageNumber, isActive, onClick }: PDFThumbnailProps)
         }
       `}
     >
-      <div className="w-full aspect-[3/4] bg-white rounded shadow-sm overflow-hidden flex items-center justify-center">
+      <div className={`w-full aspect-[3/4] rounded shadow-sm overflow-hidden flex items-center justify-center ${isDarkMode ? 'bg-[#1a1a2e]' : 'bg-white'}`}>
         {loaded ? (
           <canvas ref={canvasRef} className="w-full h-full object-contain" />
         ) : (

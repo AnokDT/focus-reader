@@ -32,6 +32,7 @@ interface ReaderHeaderProps {
   onToggleOutline: () => void
   onToggleRSVP: () => void
   onToggleVocabulary: () => void
+  onToggleInsights: () => void
 }
 
 export function ReaderHeader({
@@ -51,6 +52,7 @@ export function ReaderHeader({
   onToggleOutline,
   onToggleRSVP,
   onToggleVocabulary,
+  onToggleInsights,
 }: ReaderHeaderProps) {
   return (
     <header className="h-12 border-b border-[var(--color-surface-3)] bg-[var(--color-surface-1)] flex items-center justify-between px-4 shrink-0 theme-transition z-20">
@@ -114,6 +116,9 @@ export function ReaderHeader({
         </Tooltip>
         <Tooltip content="My vocabulary (V)">
           <Button variant="ghost" size="sm" onClick={onToggleVocabulary} icon={<BookOpen size={15} />} />
+        </Tooltip>
+        <Tooltip content="Reading insights (I)">
+          <Button variant="ghost" size="sm" onClick={onToggleInsights} icon={<BookOpen size={15} />} />
         </Tooltip>
         <Tooltip content="Search (Ctrl+F)">
           <Button variant="ghost" size="sm" onClick={() => useUIStore.getState().toggleSearch()} icon={<Search size={15} />} />

@@ -136,7 +136,7 @@ export function PDFPageRenderer({
   }, [])
 
   return (
-    <div className="relative" style={{ width: pageWidth || 'auto', height: pageHeight || 'auto' }}>
+    <div className={`relative ${isDarkMode ? 'bg-[#1a1a2e]' : 'bg-white'}`} style={{ width: pageWidth || 'auto', height: pageHeight || 'auto' }}>
       <canvas
         ref={canvasRef}
         className={`block ${isDarkMode ? 'pdf-canvas-dark' : ''}`}
