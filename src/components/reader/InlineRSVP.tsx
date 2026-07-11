@@ -15,11 +15,11 @@ interface InlineRSVPProps {
   text: string
   positions: WordPosition[]
   onClose: () => void
+  pageContainerRef?: React.RefObject<HTMLDivElement | null>
 }
 
 // Unicode-aware word tokenization — works for English, Malayalam, Arabic, Hindi, etc.
 function tokenizeWords(text: string): string[] {
-  // Match word characters including Unicode letters/digits, or single punctuation
   const tokens: string[] = []
   const regex = /[\p{L}\p{N}]+/gu
   let match
@@ -39,23 +39,14 @@ function buildWordPositionMap(
 
   for (let posIdx = 0; posIdx < positions.length && tokenIdx < tokens.length; posIdx++) {
     const pos = positions[posIdx]
-    // Split the item text into words using same tokenizer
     const itemWords = tokenizeWords(pos.word)
 
     for (let subIdx = 0; subIdx < itemWords.length && tokenIdx < tokens.length; subIdx++) {
-      // Try to match by content
-      if (itemWords[subIdx] === tokens[tokenIdx]) {
-        map.set(tokenIdx, { posIdx, subOffset: subIdx })
-        tokenIdx++
-      } else {
-        // Fallback: advance both — this handles cases where tokenizers differ slightly
-        map.set(tokenIdx, { posIdx, subOffset: subIdx })
-        tokenIdx++
-      }
+      map.set(tokenIdx, { posIdx, subOffset: subIdx })
+      tokenIdx++
     }
   }
 
-  // Map any remaining tokens to the last position
   while (tokenIdx < tokens.length) {
     map.set(tokenIdx, { posIdx: Math.max(0, positions.length - 1), subOffset: 0 })
     tokenIdx++
@@ -64,7 +55,7 @@ function buildWordPositionMap(
   return map
 }
 
-export function InlineRSVP({ text, positions, onClose }: InlineRSVPProps) {
+export function InlineRSVP({ text, positions, onClose, pageContainerRef }: InlineRSVPProps) {
   const tokens = useMemo(() => tokenizeWords(text), [text])
   const [currentIndex, setCurrentIndex] = useState(0)
   const [isPlaying, setIsPlaying] = useState(false)
@@ -72,15 +63,15 @@ export function InlineRSVP({ text, positions, onClose }: InlineRSVPProps) {
   const [showControls, setShowControls] = useState(true)
   const intervalRef = useRef<ReturnType<typeof setInterval>>(undefined)
   const controlsTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const [, setTick] = useState(0) // force re-render for scroll updates
 
-  // Build position map
   const wordPositionMap = useMemo(() => buildWordPositionMap(tokens, positions), [tokens, positions])
 
   const currentWord = tokens[currentIndex] || ''
   const progress = tokens.length > 0 ? (currentIndex / tokens.length) * 100 : 0
 
-  // Get position for current word (positions are viewport-relative percentages)
-  const currentPosition = useMemo(() => {
+  // Get position for current word in viewport pixel coordinates
+  const currentViewportPos = useMemo(() => {
     if (positions.length === 0 || currentIndex >= tokens.length) return null
     const mapping = wordPositionMap.get(currentIndex)
     if (!mapping) return null
@@ -88,7 +79,6 @@ export function InlineRSVP({ text, positions, onClose }: InlineRSVPProps) {
     const pos = positions[mapping.posIdx]
     if (!pos) return null
 
-    // If the item contains multiple words, estimate the sub-word position
     if (pos.isItem && mapping.subOffset > 0) {
       const itemWords = tokenizeWords(pos.word)
       const totalWords = itemWords.length || 1
@@ -102,6 +92,20 @@ export function InlineRSVP({ text, positions, onClose }: InlineRSVPProps) {
 
     return pos
   }, [positions, currentIndex, wordPositionMap, tokens.length])
+
+  // Convert viewport coordinates to screen coordinates using page container
+  const screenPosition = useMemo(() => {
+    if (!currentViewportPos || !pageContainerRef?.current) return null
+    const pageRect = pageContainerRef.current.getBoundingClientRect()
+    // positions.x/y are in viewport pixel space (same as CSS pixels of the canvas)
+    // pageRect gives us the screen position of the page container
+    return {
+      screenX: pageRect.left + currentViewportPos.x,
+      screenY: pageRect.top + currentViewportPos.y,
+      width: currentViewportPos.width,
+      height: currentViewportPos.height,
+    }
+  }, [currentViewportPos, pageContainerRef, setTick]) // setTick forces recalculation
 
   // Auto-play timer
   useEffect(() => {
@@ -134,6 +138,15 @@ export function InlineRSVP({ text, positions, onClose }: InlineRSVPProps) {
     }
     return () => clearTimeout(controlsTimeoutRef.current)
   }, [showControls, isPlaying, currentIndex])
+
+  // Recalculate position on scroll
+  useEffect(() => {
+    const scrollEl = pageContainerRef?.current?.closest('[class*="overflow-auto"]') as HTMLElement | null
+    if (!scrollEl) return
+    const handleScroll = () => setTick((n) => n + 1)
+    scrollEl.addEventListener('scroll', handleScroll, { passive: true })
+    return () => scrollEl.removeEventListener('scroll', handleScroll)
+  }, [pageContainerRef])
 
   const handlePlay = useCallback(() => {
     if (currentIndex >= tokens.length - 1) setCurrentIndex(0)
@@ -179,9 +192,9 @@ export function InlineRSVP({ text, positions, onClose }: InlineRSVPProps) {
 
   return (
     <>
-      {/* Word highlight overlay ON the PDF page */}
+      {/* Word highlight overlay positioned at actual screen coordinates */}
       <AnimatePresence>
-        {currentPosition && (
+        {screenPosition && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -189,20 +202,20 @@ export function InlineRSVP({ text, positions, onClose }: InlineRSVPProps) {
             transition={{ duration: 0.08 }}
             className="fixed pointer-events-none"
             style={{
-              left: `${currentPosition.x * 100}%`,
-              top: `${currentPosition.y * 100}%`,
-              width: `${Math.max(currentPosition.width * 100, 3)}%`,
-              height: `${Math.max(currentPosition.height * 100, 2)}%`,
+              left: `${screenPosition.screenX}px`,
+              top: `${screenPosition.screenY}px`,
+              width: `${Math.max(screenPosition.width, 30)}px`,
+              height: `${Math.max(screenPosition.height, 14)}px`,
               zIndex: 50,
-              transform: 'translate(-50%, -50%)',
+              transform: 'translateY(-2px)',
             }}
           >
             <div
               className="absolute -inset-[2px] rounded"
               style={{
-                background: 'rgba(var(--color-accent-rgb, 59, 130, 246), 0.22)',
+                background: 'rgba(var(--color-accent-rgb, 59, 130, 246), 0.25)',
                 border: '2px solid var(--color-accent)',
-                boxShadow: '0 0 16px rgba(var(--color-accent-rgb, 59, 130, 246), 0.25)',
+                boxShadow: '0 0 20px rgba(var(--color-accent-rgb, 59, 130, 246), 0.3)',
               }}
             />
           </motion.div>

@@ -128,11 +128,6 @@
   --color-focus-line: #cd853f;
 }
 
-/* PDF canvas dark mode - smarter inversion */
-.pdf-canvas-dark {
-  filter: invert(0.88) hue-rotate(180deg) brightness(1.1) contrast(1.05);
-}
-
 /* Focus guide styles */
 .focus-guide-overlay {
   pointer-events: none;
@@ -168,14 +163,7 @@ input[type="number"] {
   color: inherit;
 }
 
-/* Text layer spans — invisible but selectable */
-[data-page-number] span[data-text] {
-  color: transparent !important;
-  background: transparent !important;
-  user-select: text !important;
-  -webkit-user-select: text !important;
-  cursor: text;
-}
+/* Text layer spans — hover feedback */
 [data-page-number] span[data-text]:hover {
   background-color: rgba(59, 130, 246, 0.06) !important;
 }

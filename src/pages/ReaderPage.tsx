@@ -27,7 +27,7 @@ interface PageDimensions {
   height: number
 }
 
-const VIRTUALIZATION_BUFFER = 4
+const VIRTUALIZATION_BUFFER = 2
 
 export function ReaderPage() {
   const { id } = useParams<{ id: string }>()
@@ -64,6 +64,7 @@ export function ReaderPage() {
   const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map())
   const currentPageRef = useRef(1)
   const pageTimesRef = useRef<Record<number, number>>({})
+  const currentPageContainerRef = useRef<HTMLDivElement | null>(null)
 
   const isDarkMode = theme === 'dark'
 
@@ -392,7 +393,10 @@ export function ReaderPage() {
                     <div
                       key={page}
                       data-page-number={page}
-                      ref={(el) => { if (el) pageRefs.current.set(page, el) }}
+                      ref={(el) => {
+                        if (el) pageRefs.current.set(page, el)
+                        if (page === currentPage) currentPageContainerRef.current = el
+                      }}
                       className="relative"
                     >
                       <div className="absolute -top-5 left-1/2 -translate-x-1/2 z-10">
@@ -488,6 +492,7 @@ export function ReaderPage() {
             text={currentPageText}
             positions={pagePositions[currentPage] || []}
             onClose={() => setShowInlineRSVP(false)}
+            pageContainerRef={currentPageContainerRef}
           />
         )}
       </AnimatePresence>

@@ -39,7 +39,7 @@ export function PDFPageRenderer({
 }: PDFPageRendererProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const textLayerRef = useRef<HTMLDivElement>(null)
-  const textLayerElementRef = useRef<HTMLDivElement | null>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
   const [rendered, setRendered] = useState(false)
   const [loading, setLoading] = useState(true)
   const renderTaskRef = useRef<any>(null)
@@ -77,6 +77,28 @@ export function PDFPageRenderer({
 
       renderTaskRef.current = page.render({ canvas, viewport })
       await renderTaskRef.current.promise
+
+      // Apply dark mode by drawing directly on canvas — no CSS filter compositing issues
+      if (isDarkMode) {
+        try {
+          const bitmap = await createImageBitmap(canvas)
+          ctx.filter = 'invert(1) brightness(1.1) contrast(1.05)'
+          ctx.drawImage(bitmap, 0, 0)
+          ctx.filter = 'none'
+          bitmap.close()
+        } catch {
+          // Fallback: use pixel manipulation
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+          const data = imageData.data
+          for (let i = 0; i < data.length; i += 4) {
+            data[i] = Math.min(255, (255 - data[i]) * 1.1)
+            data[i + 1] = Math.min(255, (255 - data[i + 1]) * 1.1)
+            data[i + 2] = Math.min(255, (255 - data[i + 2]) * 1.1)
+          }
+          ctx.putImageData(imageData, 0, 0)
+        }
+      }
+
       setRendered(true)
       setLoading(false)
 
@@ -100,10 +122,10 @@ export function PDFPageRenderer({
           const itemWidth = item.width * scale || item.str.length * fontHeight * 0.5
           positions.push({
             word: item.str,
-            x: screenX / viewport.width,
-            y: screenY / viewport.height,
-            width: itemWidth / viewport.width,
-            height: fontHeight / viewport.height,
+            x: screenX,
+            y: screenY,
+            width: itemWidth,
+            height: fontHeight,
             isItem: true,
           })
         })
@@ -115,7 +137,7 @@ export function PDFPageRenderer({
       }
       setLoading(false)
     }
-  }, [pdf, pageNumber, scale, isVisible, rendered, onTextExtracted, onDimensionsReady, onPositionExtracted])
+  }, [pdf, pageNumber, scale, isVisible, rendered, isDarkMode, onTextExtracted, onDimensionsReady, onPositionExtracted])
 
   useEffect(() => {
     if (isVisible && !rendered) {
@@ -131,12 +153,12 @@ export function PDFPageRenderer({
     }
   }, [])
 
-  // Build/clear text layer when isCurrentPage changes
+  // Build text layer ONLY for current page; clear when it becomes non-current
   useEffect(() => {
-    const textLayerEl = textLayerElementRef.current
-    if (!textLayerEl || !rendered) return
+    const textLayerEl = textLayerRef.current
+    if (!textLayerEl) return
 
-    if (isCurrentPage && textContentRef.current && viewportRef.current) {
+    if (isCurrentPage && rendered && textContentRef.current && viewportRef.current) {
       const content = textContentRef.current
       const vp = viewportRef.current
       textLayerEl.innerHTML = ''
@@ -174,20 +196,17 @@ export function PDFPageRenderer({
 
         span.addEventListener('mouseup', (e: MouseEvent) => {
           e.stopPropagation()
-          // Get the word at the cursor position, not the full selection
           const range = document.caretRangeFromPoint(e.clientX, e.clientY)
           let word = ''
           if (range && range.startContainer instanceof Text) {
             const text = range.startContainer.textContent || ''
             const offset = range.startOffset
-            // Find word boundaries around the cursor position
             let start = offset
             let end = offset
             while (start > 0 && /[\p{L}\p{N}]/u.test(text[start - 1])) start--
             while (end < text.length && /[\p{L}\p{N}]/u.test(text[end])) end++
             word = text.slice(start, end).trim()
           }
-          // Fallback: use selection if no word found at cursor
           if (!word) {
             const selection = window.getSelection()
             word = selection?.toString().trim() || ''
@@ -205,35 +224,34 @@ export function PDFPageRenderer({
     }
   }, [isCurrentPage, rendered, scale, onWordSelect])
 
+  // Only render text layer div for current page
+  const showTextLayer = isCurrentPage && rendered
+
   return (
     <div
+      ref={containerRef}
       className={`relative ${isDarkMode ? 'bg-[#1a1a2e]' : 'bg-white'}`}
       style={{
         width: pageWidth || 'auto',
         height: pageHeight || 'auto',
-        isolation: 'isolate',
         overflow: 'hidden',
       }}
     >
       <canvas
         ref={canvasRef}
-        className={`block relative ${isDarkMode ? 'pdf-canvas-dark' : ''}`}
-        style={{ imageRendering: 'auto', zIndex: 1 }}
+        className="block relative"
+        style={{ imageRendering: 'auto' }}
       />
 
-      {/* Text layer — rendered but non-interactive for non-current pages */}
-      {rendered && (
+      {/* Text layer — ONLY rendered in DOM for current page */}
+      {showTextLayer && (
         <div
-          ref={(el) => {
-            textLayerRef.current = el
-            textLayerElementRef.current = el
-          }}
+          ref={textLayerRef}
           className="absolute inset-0"
           style={{
-            pointerEvents: isCurrentPage ? 'auto' : 'none',
-            userSelect: isCurrentPage ? 'text' : 'none',
-            WebkitUserSelect: isCurrentPage ? 'text' : 'none',
-            zIndex: 2,
+            pointerEvents: 'auto',
+            userSelect: 'text',
+            WebkitUserSelect: 'text',
             overflow: 'hidden',
           }}
         />
