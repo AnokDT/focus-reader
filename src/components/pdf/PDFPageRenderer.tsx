@@ -1,6 +1,14 @@
 import { useRef, useEffect, useCallback, useState } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
 
+export interface WordPos {
+  word: string
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
 interface PDFPageRendererProps {
   pdf: pdfjsLib.PDFDocumentProxy
   pageNumber: number
@@ -11,8 +19,8 @@ interface PDFPageRendererProps {
   rsvpActive?: boolean
   onTextExtracted?: (pageNumber: number, text: string) => void
   onDimensionsReady?: (pageNumber: number, width: number, height: number) => void
-  onWordSelect?: (word: string, x: number, y: number) => void
-  onPositionExtracted?: (pageNumber: number, positions: { word: string; x: number; y: number; width: number; height: number; isItem?: boolean }[]) => void
+  onWordsExtracted?: (pageNumber: number, words: WordPos[]) => void
+  onPageClick?: (pageNumber: number, x: number, y: number) => void
 }
 
 function applyTransform(t1: number[], t2: number[]): number[] {
@@ -26,6 +34,43 @@ function applyTransform(t1: number[], t2: number[]): number[] {
   ]
 }
 
+function extractWords(items: any[], viewport: any, scale: number): WordPos[] {
+  const words: WordPos[] = []
+  for (const item of items) {
+    if (!item.str || !item.transform) continue
+    const tx = applyTransform(viewport.transform, item.transform)
+    const fontHeight = Math.abs(tx[3]) || Math.abs(tx[0])
+    const lineHeight = fontHeight * 1.2
+
+    // Split the text item into individual words
+    const text = item.str
+    const wordRegex = /[\p{L}\p{N}]+/gu
+    let match: RegExpExecArray | null
+    let charOffset = 0
+
+    while ((match = wordRegex.exec(text)) !== null) {
+      const word = match[0]
+      const wordStart = match.index
+      const wordLen = word.length
+
+      // Estimate horizontal position within the line
+      const charWidth = item.width > 0 ? item.width / Math.max(text.length, 1) : fontHeight * 0.5
+      const wordX = tx[4] + wordStart * charWidth * scale
+      const wordW = wordLen * charWidth * scale
+
+      words.push({
+        word,
+        x: wordX,
+        y: tx[5] - lineHeight * 0.85,
+        width: Math.max(wordW, 10),
+        height: lineHeight,
+      })
+      charOffset = wordStart + wordLen
+    }
+  }
+  return words
+}
+
 export function PDFPageRenderer({
   pdf,
   pageNumber,
@@ -36,21 +81,19 @@ export function PDFPageRenderer({
   rsvpActive = false,
   onTextExtracted,
   onDimensionsReady,
-  onWordSelect,
-  onPositionExtracted,
+  onWordsExtracted,
+  onPageClick,
 }: PDFPageRendererProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const textLayerRef = useRef<HTMLDivElement>(null)
-  const [rendered, setRendered] = useState(false)
-  const [loading, setLoading] = useState(true)
-  const renderTaskRef = useRef<any>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
   const [pageWidth, setPageWidth] = useState(0)
   const [pageHeight, setPageHeight] = useState(0)
-  const textContentRef = useRef<any>(null)
-  const viewportRef = useRef<any>(null)
+  const [loading, setLoading] = useState(true)
+  const renderTaskRef = useRef<any>(null)
+  const renderedRef = useRef(false)
 
   const renderPage = useCallback(async () => {
-    if (!canvasRef.current || !isVisible || rendered) return
+    if (!canvasRef.current || !isVisible || renderedRef.current) return
 
     try {
       setLoading(true)
@@ -78,51 +121,30 @@ export function PDFPageRenderer({
 
       renderTaskRef.current = page.render({ canvas, viewport })
       await renderTaskRef.current.promise
-      setRendered(true)
+      renderedRef.current = true
       setLoading(false)
 
-      // Extract text content
+      // Extract text
       const content = await page.getTextContent()
-      textContentRef.current = content
-      viewportRef.current = viewport
-
       const text = content.items.map((item: any) => item.str).join(' ')
       onTextExtracted?.(pageNumber, text)
 
-      // Build word positions for RSVP (in absolute viewport pixel coordinates)
-      if (onPositionExtracted) {
-        const positions: { word: string; x: number; y: number; width: number; height: number; isItem?: boolean }[] = []
-        content.items.forEach((item: any) => {
-          if (!item.str || !item.transform) return
-          const tx = applyTransform(viewport.transform, item.transform)
-          const screenX = tx[4]
-          const screenY = tx[5]
-          const fontHeight = Math.abs(tx[3]) || Math.abs(tx[0])
-          const itemWidth = item.width * scale || item.str.length * fontHeight * 0.5
-          positions.push({
-            word: item.str,
-            x: screenX,
-            y: screenY,
-            width: itemWidth,
-            height: fontHeight,
-            isItem: true,
-          })
-        })
-        onPositionExtracted(pageNumber, positions)
-      }
+      // Extract word positions (stored in memory, NO DOM elements created)
+      const words = extractWords(content.items, viewport, scale)
+      onWordsExtracted?.(pageNumber, words)
     } catch (err: any) {
       if (err?.name !== 'RenderingCancelledException') {
         console.error(`Failed to render page ${pageNumber}:`, err)
       }
       setLoading(false)
     }
-  }, [pdf, pageNumber, scale, isVisible, rendered, onTextExtracted, onDimensionsReady, onPositionExtracted])
+  }, [pdf, pageNumber, scale, isVisible, onTextExtracted, onDimensionsReady, onWordsExtracted])
 
   useEffect(() => {
-    if (isVisible && !rendered) {
+    if (isVisible && !renderedRef.current) {
       renderPage()
     }
-  }, [isVisible, rendered, renderPage])
+  }, [isVisible, renderPage])
 
   useEffect(() => {
     return () => {
@@ -132,114 +154,40 @@ export function PDFPageRenderer({
     }
   }, [])
 
-  // Build/clear text layer — only for current page, only when RSVP is NOT active
-  useEffect(() => {
-    const textLayerEl = textLayerRef.current
-    if (!textLayerEl) return
-
-    if (isCurrentPage && !rsvpActive && rendered && textContentRef.current && viewportRef.current) {
-      const content = textContentRef.current
-      const vp = viewportRef.current
-      textLayerEl.innerHTML = ''
-
-      content.items.forEach((item: any) => {
-        if (!item.str || !item.transform) return
-        const tx = applyTransform(vp.transform, item.transform)
-        const screenX = tx[4]
-        const screenY = tx[5]
-        const fontHeight = Math.abs(tx[3]) || Math.abs(tx[0])
-        const itemWidth = item.width * scale || item.str.length * fontHeight * 0.5
-
-        const left = (screenX / vp.width) * 100
-        const top = (screenY / vp.height) * 100
-        const widthPct = (itemWidth / vp.width) * 100
-        const heightPct = (fontHeight / vp.height) * 100
-
-        const span = window.document.createElement('span')
-        span.textContent = item.str
-        span.setAttribute('data-text', item.str)
-        span.style.position = 'absolute'
-        span.style.left = `${left}%`
-        span.style.top = `${top}%`
-        span.style.width = `${widthPct}%`
-        span.style.height = `${heightPct}%`
-        span.style.fontSize = `${fontHeight * 0.9}px`
-        span.style.fontFamily = 'sans-serif, Noto Sans, Noto Sans Malayalam, Noto Sans Devanagari, system-ui'
-        span.style.lineHeight = '1.1'
-        span.style.whiteSpace = 'pre'
-        span.style.color = 'transparent'
-        span.style.cursor = 'text'
-        span.style.userSelect = 'text'
-        span.style.webkitUserSelect = 'text'
-        span.style.pointerEvents = 'auto'
-
-        span.addEventListener('mouseup', (e: MouseEvent) => {
-          e.stopPropagation()
-          const range = document.caretRangeFromPoint(e.clientX, e.clientY)
-          let word = ''
-          if (range && range.startContainer instanceof Text) {
-            const text = range.startContainer.textContent || ''
-            const offset = range.startOffset
-            let start = offset
-            let end = offset
-            while (start > 0 && /[\p{L}\p{N}]/u.test(text[start - 1])) start--
-            while (end < text.length && /[\p{L}\p{N}]/u.test(text[end])) end++
-            word = text.slice(start, end).trim()
-          }
-          if (!word) {
-            const selection = window.getSelection()
-            word = selection?.toString().trim() || ''
-          }
-          if (word.length >= 2 && onWordSelect) {
-            const rect = span.getBoundingClientRect()
-            onWordSelect(word, rect.left + rect.width / 2, rect.bottom + 8)
-          }
-        })
-
-        textLayerEl.appendChild(span)
-      })
-    } else {
-      textLayerEl.innerHTML = ''
-    }
-  }, [isCurrentPage, rsvpActive, rendered, scale, onWordSelect])
-
-  // Only show text layer for current page when RSVP is not active
-  const showTextLayer = isCurrentPage && !rsvpActive && rendered
+  // Click handler for word detection — matches click coordinates to stored word positions
+  const handleClick = useCallback((e: React.MouseEvent) => {
+    if (!isCurrentPage || rsvpActive || !onPageClick) return
+    const rect = containerRef.current?.getBoundingClientRect()
+    if (!rect) return
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+    onPageClick(pageNumber, x, y)
+  }, [isCurrentPage, rsvpActive, pageNumber, onPageClick])
 
   return (
     <div
+      ref={containerRef}
       className={`relative ${isDarkMode ? 'bg-[#1a1a2e]' : 'bg-white'}`}
       style={{
         width: pageWidth || 'auto',
         height: pageHeight || 'auto',
         overflow: 'hidden',
+        cursor: isCurrentPage ? 'default' : 'default',
       }}
+      onClick={handleClick}
     >
+      {/* Canvas — the ONLY child. No text layer. No spans. Nothing else. */}
       <canvas
         ref={canvasRef}
-        className={`block relative ${isDarkMode ? 'pdf-canvas-dark' : ''}`}
+        className={`block ${isDarkMode ? 'pdf-canvas-dark' : ''}`}
         style={{ imageRendering: 'auto' }}
       />
 
-      {/* Dimming overlay when RSVP is active — darkens entire page */}
-      {rsvpActive && isCurrentPage && rendered && (
+      {/* Dimming overlay when RSVP is active */}
+      {rsvpActive && isCurrentPage && renderedRef.current && (
         <div
-          className="absolute inset-0 z-[3]"
+          className="absolute inset-0 z-[3] pointer-events-none"
           style={{ background: 'rgba(0, 0, 0, 0.65)' }}
-        />
-      )}
-
-      {/* Text layer — ONLY for current page, ONLY when RSVP is off */}
-      {showTextLayer && (
-        <div
-          ref={textLayerRef}
-          className="absolute inset-0 z-[2]"
-          style={{
-            pointerEvents: 'auto',
-            userSelect: 'text',
-            WebkitUserSelect: 'text',
-            overflow: 'hidden',
-          }}
         />
       )}
 

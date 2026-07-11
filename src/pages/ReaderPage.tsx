@@ -10,7 +10,7 @@ import { useAnalyticsStore } from '@/stores/analyticsStore'
 import { storageService } from '@/services/storageService'
 import { pdfService } from '@/services/pdfService'
 import { ReaderHeader } from '@/components/layout/ReaderHeader'
-import { PDFPageRenderer } from '@/components/pdf/PDFPageRenderer'
+import { PDFPageRenderer, type WordPos } from '@/components/pdf/PDFPageRenderer'
 import { PDFThumbnailPanel } from '@/components/pdf/PDFThumbnails'
 import { PDFSearchPanel } from '@/components/pdf/PDFSearch'
 import { FocusGuide } from '@/components/reader/FocusGuide'
@@ -48,7 +48,7 @@ export function ReaderPage() {
   const [currentSearchIndex, setCurrentSearchIndex] = useState(0)
   const [pageTexts, setPageTexts] = useState<Record<number, string>>({})
   const [pageDimensions, setPageDimensions] = useState<Record<number, PageDimensions>>({})
-  const [pagePositions, setPagePositions] = useState<Record<number, { word: string; x: number; y: number; width: number; height: number; isItem?: boolean }[]>>({})
+  const [pageWords, setPageWords] = useState<Record<number, WordPos[]>>({})
   const [scrollProgress, setScrollProgress] = useState(0)
 
   const [selectedWord, setSelectedWord] = useState<{ word: string; x: number; y: number } | null>(null)
@@ -68,13 +68,12 @@ export function ReaderPage() {
 
   const isDarkMode = theme === 'dark'
 
-  // Consolidated time tracking: live-updates display every 2s, saves on page change
+  // Consolidated time tracking
   useEffect(() => {
     const pageAtStart = currentPage
     const enterTime = Date.now()
     let lastFlushTime = enterTime
 
-    // Live-update heatmap display every 2 seconds
     const interval = setInterval(() => {
       const now = Date.now()
       const elapsed = now - lastFlushTime
@@ -90,7 +89,6 @@ export function ReaderPage() {
 
     return () => {
       clearInterval(interval)
-      // Final flush: accumulate remaining time since last interval
       const elapsed = Date.now() - lastFlushTime
       if (pageAtStart > 0 && (Date.now() - enterTime) >= 3000) {
         pageTimesRef.current = {
@@ -203,17 +201,48 @@ export function ReaderPage() {
     setPageDimensions((prev) => ({ ...prev, [pageNumber]: { width, height } }))
   }, [])
 
-  const handlePositionsExtracted = useCallback((pageNumber: number, positions: { word: string; x: number; y: number; width: number; height: number; isItem?: boolean }[]) => {
-    setPagePositions((prev) => ({ ...prev, [pageNumber]: positions }))
+  const handleWordsExtracted = useCallback((pageNumber: number, words: WordPos[]) => {
+    setPageWords((prev) => ({ ...prev, [pageNumber]: words }))
   }, [])
 
-  const handleWordSelect = useCallback((word: string, x: number, y: number) => {
-    // Only popup for single words or short phrases (max 5 words)
-    const cleanWord = word.replace(/[^\p{L}\p{N}]/gu, '').trim()
-    if (cleanWord.length >= 2 && cleanWord.split(/\s+/).length <= 5) {
-      setSelectedWord({ word: cleanWord, x, y })
+  // Coordinate-based word detection — finds closest word to click position
+  const handlePageClick = useCallback((pageNumber: number, x: number, y: number) => {
+    const words = pageWords[pageNumber]
+    if (!words || words.length === 0) return
+
+    let closestWord: WordPos | null = null
+    let closestDist = Infinity
+
+    for (const w of words) {
+      // Check if click is within or near the word bounds
+      const inX = x >= w.x - 5 && x <= w.x + w.width + 5
+      const inY = y >= w.y - 5 && y <= w.y + w.height + 5
+
+      if (inX && inY) {
+        const dist = Math.abs(x - (w.x + w.width / 2)) + Math.abs(y - (w.y + w.height / 2))
+        if (dist < closestDist) {
+          closestDist = dist
+          closestWord = w
+        }
+      }
     }
-  }, [])
+
+    if (closestWord && closestWord.word.length >= 2) {
+      const cleanWord = closestWord.word.replace(/[^\p{L}\p{N}]/gu, '').trim()
+      if (cleanWord.length >= 2) {
+        // Calculate screen position for the popup
+        const pageEl = pageRefs.current.get(pageNumber)
+        const pageRect = pageEl?.getBoundingClientRect()
+        if (pageRect) {
+          setSelectedWord({
+            word: cleanWord,
+            x: pageRect.left + closestWord.x + closestWord.width / 2,
+            y: pageRect.top + closestWord.y + closestWord.height,
+          })
+        }
+      }
+    }
+  }, [pageWords])
 
   const handleSearch = useCallback(
     (query: string) => {
@@ -243,13 +272,13 @@ export function ReaderPage() {
   )
 
   const currentPageText = useMemo(() => pageTexts[currentPage] || '', [pageTexts, currentPage])
-  const allText = useMemo(() => Object.values(pageTexts).join(' '), [pageTexts])
+  const currentPageWords = useMemo(() => pageWords[currentPage] || [], [pageWords, currentPage])
 
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
-      if (showInlineRSVP) return // RSVP has its own keyboard handler
+      if (showInlineRSVP) return
       switch (e.key) {
         case 'ArrowLeft': e.preventDefault(); handlePageChange(currentPage - 1); break
         case 'ArrowRight': e.preventDefault(); handlePageChange(currentPage + 1); break
@@ -421,8 +450,8 @@ export function ReaderPage() {
                             rsvpActive={showInlineRSVP}
                             onTextExtracted={handleTextExtracted}
                             onDimensionsReady={handleDimensionsReady}
-                            onWordSelect={handleWordSelect}
-                            onPositionExtracted={handlePositionsExtracted}
+                            onWordsExtracted={handleWordsExtracted}
+                            onPageClick={handlePageClick}
                           />
                         ) : (
                           <div style={{ width: 612 * scale, height: 792 * scale }} className={isDarkMode ? 'bg-[#1a1a2e]' : 'bg-[var(--color-surface-2)]'} />
@@ -491,7 +520,7 @@ export function ReaderPage() {
         {showInlineRSVP && currentPageText.length > 0 && (
           <InlineRSVP
             text={currentPageText}
-            positions={pagePositions[currentPage] || []}
+            wordPositions={currentPageWords}
             onClose={() => setShowInlineRSVP(false)}
             pageContainerRef={currentPageContainerRef}
           />
