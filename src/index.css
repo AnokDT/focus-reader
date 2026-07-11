@@ -158,7 +158,13 @@ input[type="number"] {
   -moz-appearance: textfield;
 }
 
-/* Word selection highlight — only on text layer spans */
+/* Text layer spans — completely invisible, no hover effects */
+[data-page-number] span[data-text] {
+  color: transparent !important;
+  background: transparent !important;
+}
+
+/* Word selection highlight — only when user actively selects */
 [data-page-number] span[data-text]::selection {
   background-color: rgba(59, 130, 246, 0.4);
   color: inherit;
@@ -166,11 +172,6 @@ input[type="number"] {
 [data-page-number] span[data-text]::-moz-selection {
   background-color: rgba(59, 130, 246, 0.4);
   color: inherit;
-}
-
-/* Text layer spans — hover feedback */
-[data-page-number] span[data-text]:hover {
-  background-color: rgba(59, 130, 246, 0.08) !important;
 }
 
 /* RTL text support */
