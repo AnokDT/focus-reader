@@ -8,6 +8,7 @@ interface PDFPageRendererProps {
   isVisible: boolean
   isCurrentPage?: boolean
   isDarkMode?: boolean
+  rsvpActive?: boolean
   onTextExtracted?: (pageNumber: number, text: string) => void
   onDimensionsReady?: (pageNumber: number, width: number, height: number) => void
   onWordSelect?: (word: string, x: number, y: number) => void
@@ -32,6 +33,7 @@ export function PDFPageRenderer({
   isVisible,
   isCurrentPage = false,
   isDarkMode = false,
+  rsvpActive = false,
   onTextExtracted,
   onDimensionsReady,
   onWordSelect,
@@ -39,7 +41,6 @@ export function PDFPageRenderer({
 }: PDFPageRendererProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const textLayerRef = useRef<HTMLDivElement>(null)
-  const containerRef = useRef<HTMLDivElement>(null)
   const [rendered, setRendered] = useState(false)
   const [loading, setLoading] = useState(true)
   const renderTaskRef = useRef<any>(null)
@@ -77,28 +78,6 @@ export function PDFPageRenderer({
 
       renderTaskRef.current = page.render({ canvas, viewport })
       await renderTaskRef.current.promise
-
-      // Apply dark mode by drawing directly on canvas — no CSS filter compositing issues
-      if (isDarkMode) {
-        try {
-          const bitmap = await createImageBitmap(canvas)
-          ctx.filter = 'invert(1) brightness(1.1) contrast(1.05)'
-          ctx.drawImage(bitmap, 0, 0)
-          ctx.filter = 'none'
-          bitmap.close()
-        } catch {
-          // Fallback: use pixel manipulation
-          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-          const data = imageData.data
-          for (let i = 0; i < data.length; i += 4) {
-            data[i] = Math.min(255, (255 - data[i]) * 1.1)
-            data[i + 1] = Math.min(255, (255 - data[i + 1]) * 1.1)
-            data[i + 2] = Math.min(255, (255 - data[i + 2]) * 1.1)
-          }
-          ctx.putImageData(imageData, 0, 0)
-        }
-      }
-
       setRendered(true)
       setLoading(false)
 
@@ -110,7 +89,7 @@ export function PDFPageRenderer({
       const text = content.items.map((item: any) => item.str).join(' ')
       onTextExtracted?.(pageNumber, text)
 
-      // Build word positions for RSVP
+      // Build word positions for RSVP (in absolute viewport pixel coordinates)
       if (onPositionExtracted) {
         const positions: { word: string; x: number; y: number; width: number; height: number; isItem?: boolean }[] = []
         content.items.forEach((item: any) => {
@@ -137,7 +116,7 @@ export function PDFPageRenderer({
       }
       setLoading(false)
     }
-  }, [pdf, pageNumber, scale, isVisible, rendered, isDarkMode, onTextExtracted, onDimensionsReady, onPositionExtracted])
+  }, [pdf, pageNumber, scale, isVisible, rendered, onTextExtracted, onDimensionsReady, onPositionExtracted])
 
   useEffect(() => {
     if (isVisible && !rendered) {
@@ -153,12 +132,12 @@ export function PDFPageRenderer({
     }
   }, [])
 
-  // Build text layer ONLY for current page; clear when it becomes non-current
+  // Build/clear text layer — only for current page, only when RSVP is NOT active
   useEffect(() => {
     const textLayerEl = textLayerRef.current
     if (!textLayerEl) return
 
-    if (isCurrentPage && rendered && textContentRef.current && viewportRef.current) {
+    if (isCurrentPage && !rsvpActive && rendered && textContentRef.current && viewportRef.current) {
       const content = textContentRef.current
       const vp = viewportRef.current
       textLayerEl.innerHTML = ''
@@ -222,14 +201,13 @@ export function PDFPageRenderer({
     } else {
       textLayerEl.innerHTML = ''
     }
-  }, [isCurrentPage, rendered, scale, onWordSelect])
+  }, [isCurrentPage, rsvpActive, rendered, scale, onWordSelect])
 
-  // Only render text layer div for current page
-  const showTextLayer = isCurrentPage && rendered
+  // Only show text layer for current page when RSVP is not active
+  const showTextLayer = isCurrentPage && !rsvpActive && rendered
 
   return (
     <div
-      ref={containerRef}
       className={`relative ${isDarkMode ? 'bg-[#1a1a2e]' : 'bg-white'}`}
       style={{
         width: pageWidth || 'auto',
@@ -239,15 +217,23 @@ export function PDFPageRenderer({
     >
       <canvas
         ref={canvasRef}
-        className="block relative"
+        className={`block relative ${isDarkMode ? 'pdf-canvas-dark' : ''}`}
         style={{ imageRendering: 'auto' }}
       />
 
-      {/* Text layer — ONLY rendered in DOM for current page */}
+      {/* Dimming overlay when RSVP is active — darkens entire page */}
+      {rsvpActive && isCurrentPage && rendered && (
+        <div
+          className="absolute inset-0 z-[3]"
+          style={{ background: 'rgba(0, 0, 0, 0.65)' }}
+        />
+      )}
+
+      {/* Text layer — ONLY for current page, ONLY when RSVP is off */}
       {showTextLayer && (
         <div
           ref={textLayerRef}
-          className="absolute inset-0"
+          className="absolute inset-0 z-[2]"
           style={{
             pointerEvents: 'auto',
             userSelect: 'text',

@@ -128,6 +128,11 @@
   --color-focus-line: #cd853f;
 }
 
+/* PDF canvas dark mode — CSS filter on canvas element only */
+.pdf-canvas-dark {
+  filter: invert(0.88) hue-rotate(180deg) brightness(1.1) contrast(1.05);
+}
+
 /* Focus guide styles */
 .focus-guide-overlay {
   pointer-events: none;
@@ -153,28 +158,28 @@ input[type="number"] {
   -moz-appearance: textfield;
 }
 
-/* Word selection highlight */
-[data-page-number] ::selection {
-  background-color: rgba(59, 130, 246, 0.35);
+/* Word selection highlight — only on text layer spans */
+[data-page-number] span[data-text]::selection {
+  background-color: rgba(59, 130, 246, 0.4);
   color: inherit;
 }
-[data-page-number] ::-moz-selection {
-  background-color: rgba(59, 130, 246, 0.35);
+[data-page-number] span[data-text]::-moz-selection {
+  background-color: rgba(59, 130, 246, 0.4);
   color: inherit;
 }
 
 /* Text layer spans — hover feedback */
 [data-page-number] span[data-text]:hover {
-  background-color: rgba(59, 130, 246, 0.06) !important;
+  background-color: rgba(59, 130, 246, 0.08) !important;
 }
 
-/* RTL text support for Arabic, Hebrew, etc. */
+/* RTL text support */
 [data-page-number] span[data-text]:dir(rtl) {
   direction: rtl;
   text-align: right;
 }
 
-/* CJK and complex script support */
+/* Complex script font support */
 [data-page-number] span[data-text] {
   font-family: sans-serif, 'Noto Sans', 'Noto Sans Malayalam', 'Noto Sans Devanagari', 'Noto Sans Arabic', 'Noto Sans SC', system-ui;
 }

@@ -418,6 +418,7 @@ export function ReaderPage() {
                             isVisible={true}
                             isCurrentPage={page === currentPage}
                             isDarkMode={isDarkMode}
+                            rsvpActive={showInlineRSVP}
                             onTextExtracted={handleTextExtracted}
                             onDimensionsReady={handleDimensionsReady}
                             onWordSelect={handleWordSelect}
