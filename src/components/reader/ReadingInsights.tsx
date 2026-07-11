@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { TrendingUp, Clock, BookOpen, Zap, Target, X } from 'lucide-react'
 import { useAnalyticsStore } from '@/stores/analyticsStore'
 import { formatDuration } from '@/utils/dateUtils'
+import { ReadingPaceChart } from '@/components/analytics/ReadingPaceChart'
 
 interface ReadingInsightsProps {
   isOpen: boolean
@@ -161,6 +162,17 @@ export function ReadingInsights({ isOpen, onClose, currentPage, totalPages, page
                 </div>
               </div>
             </div>
+
+            {/* Reading Pace Chart */}
+            {Object.keys(pageTimes).length > 0 && (
+              <div className="bg-[var(--color-surface-1)] rounded-xl p-4 border border-[var(--color-surface-3)]">
+                <ReadingPaceChart
+                  pageTimes={pageTimes}
+                  totalPages={totalPages}
+                  currentPage={currentPage}
+                />
+              </div>
+            )}
           </div>
         </motion.div>
       )}

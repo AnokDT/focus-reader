@@ -7,12 +7,15 @@ import { useUIStore } from '@/stores/uiStore'
 import { useFocusStore } from '@/stores/focusStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useAnalyticsStore } from '@/stores/analyticsStore'
+import { useBookmarkStore } from '@/stores/bookmarkStore'
+import { useAnnotationStore } from '@/stores/annotationStore'
 import { storageService } from '@/services/storageService'
 import { pdfService } from '@/services/pdfService'
 import { ReaderHeader } from '@/components/layout/ReaderHeader'
 import { PDFPageRenderer, type WordPos } from '@/components/pdf/PDFPageRenderer'
 import { PDFThumbnailPanel } from '@/components/pdf/PDFThumbnails'
 import { PDFSearchPanel } from '@/components/pdf/PDFSearch'
+import { PDFOutlinePanel } from '@/components/pdf/PDFOutlinePanel'
 import { FocusGuide } from '@/components/reader/FocusGuide'
 import { FocusControls } from '@/components/reader/FocusControls'
 import { WordPopup } from '@/components/reader/WordPopup'
@@ -21,6 +24,14 @@ import { VocabularyPanel } from '@/components/reader/VocabularyPanel'
 import { ReadingTimer } from '@/components/reader/ReadingTimer'
 import { ReadingHeatmap } from '@/components/reader/ReadingHeatmap'
 import { ReadingInsights } from '@/components/reader/ReadingInsights'
+import { BookmarkPanel } from '@/components/reader/BookmarkPanel'
+import { AnnotationToolbar } from '@/components/reader/AnnotationToolbar'
+import { AnnotationLayer } from '@/components/reader/AnnotationLayer'
+import { CommandPalette } from '@/components/reader/CommandPalette'
+import {
+  Eye, EyeOff, Zap, BookOpen, BarChart3, Settings, Columns, List,
+  Moon, Sun, Bookmark, Search, Command, ZoomIn, ZoomOut, ChevronLeft, ChevronRight,
+} from 'lucide-react'
 
 interface PageDimensions {
   width: number
@@ -35,8 +46,9 @@ export function ReaderPage() {
   const updateDocument = useLibraryStore((s) => s.updateDocument)
   const focus = useFocusStore()
   const theme = useSettingsStore((s) => s.theme)
+  const setTheme = useSettingsStore((s) => s.setTheme)
   const { startSession, endSession } = useAnalyticsStore()
-  const { searchOpen, setSearchOpen, thumbnailsOpen, outlineOpen } = useUIStore()
+  const { searchOpen, setSearchOpen, thumbnailsOpen, outlineOpen, toggleOutline, commandPaletteOpen, toggleCommandPalette } = useUIStore()
 
   const [pdf, setPdf] = useState<pdfjsLib.PDFDocumentProxy | null>(null)
   const [currentPage, setCurrentPage] = useState(1)
@@ -56,7 +68,16 @@ export function ReaderPage() {
   const [showVocabulary, setShowVocabulary] = useState(false)
   const [showHeatmap, setShowHeatmap] = useState(true)
   const [showInsights, setShowInsights] = useState(false)
+  const [showBookmarks, setShowBookmarks] = useState(false)
   const [pageTimes, setPageTimes] = useState<Record<number, number>>({})
+
+  // Annotation state
+  const [annotationSelection, setAnnotationSelection] = useState<{
+    text: string
+    rects: { x: number; y: number; width: number; height: number }[]
+    screenX: number
+    screenY: number
+  } | null>(null)
 
   const containerRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -67,6 +88,9 @@ export function ReaderPage() {
   const currentPageContainerRef = useRef<HTMLDivElement | null>(null)
 
   const isDarkMode = theme === 'dark'
+  const hasBookmark = useBookmarkStore((s) => s.hasBookmark)
+  const toggleBookmark = useBookmarkStore((s) => s.toggleBookmark)
+  const isCurrentPageBookmarked = doc ? hasBookmark(doc.id, currentPage) : false
 
   // Consolidated time tracking
   useEffect(() => {
@@ -136,7 +160,7 @@ export function ReaderPage() {
     }
   }, [currentPage, doc?.id])
 
-  // IntersectionObserver for scroll-based page detection
+  // IntersectionObserver
   useEffect(() => {
     if (!scrollRef.current) return
     observerRef.current = new IntersectionObserver(
@@ -205,7 +229,7 @@ export function ReaderPage() {
     setPageWords((prev) => ({ ...prev, [pageNumber]: words }))
   }, [])
 
-  // Coordinate-based word detection — finds closest word to click position
+  // Coordinate-based word detection
   const handlePageClick = useCallback((pageNumber: number, x: number, y: number) => {
     const words = pageWords[pageNumber]
     if (!words || words.length === 0) return
@@ -214,7 +238,6 @@ export function ReaderPage() {
     let closestDist = Infinity
 
     for (const w of words) {
-      // Check if click is within or near the word bounds
       const inX = x >= w.x - 5 && x <= w.x + w.width + 5
       const inY = y >= w.y - 5 && y <= w.y + w.height + 5
 
@@ -230,7 +253,6 @@ export function ReaderPage() {
     if (closestWord && closestWord.word.length >= 2) {
       const cleanWord = closestWord.word.replace(/[^\p{L}\p{N}]/gu, '').trim()
       if (cleanWord.length >= 2) {
-        // Calculate screen position for the popup
         const pageEl = pageRefs.current.get(pageNumber)
         const pageRect = pageEl?.getBoundingClientRect()
         if (pageRect) {
@@ -243,6 +265,38 @@ export function ReaderPage() {
       }
     }
   }, [pageWords])
+
+  // Annotation: text selection handler
+  const handleTextSelection = useCallback(() => {
+    const selection = window.getSelection()
+    if (!selection || selection.isCollapsed || !selection.toString().trim()) {
+      return
+    }
+
+    const text = selection.toString().trim()
+    if (text.length < 2) return
+
+    // Get selection rectangles
+    const range = selection.getRangeAt(0)
+    const clientRects = range.getClientRects()
+    const pageEl = pageRefs.current.get(currentPage)
+    const pageRect = pageEl?.getBoundingClientRect()
+
+    if (!pageRect || clientRects.length === 0) return
+
+    const rects = Array.from(clientRects).map((r) => ({
+      x: r.left - pageRect.left,
+      y: r.top - pageRect.top,
+      width: r.width,
+      height: r.height,
+    }))
+
+    const screenX = Math.min(range.getBoundingClientRect().left, window.innerWidth - 240)
+    const screenY = range.getBoundingClientRect().top
+
+    setAnnotationSelection({ text, rects, screenX, screenY })
+    selection.removeAllRanges()
+  }, [currentPage])
 
   const handleSearch = useCallback(
     (query: string) => {
@@ -274,11 +328,42 @@ export function ReaderPage() {
   const currentPageText = useMemo(() => pageTexts[currentPage] || '', [pageTexts, currentPage])
   const currentPageWords = useMemo(() => pageWords[currentPage] || [], [pageWords, currentPage])
 
+  // Command palette commands
+  const commands = useMemo(() => {
+    if (!doc) return []
+    return [
+      { id: 'search', label: 'Search', description: 'Search in document', icon: Search, shortcut: '⌘F', action: () => useUIStore.getState().toggleSearch(), category: 'Navigation' },
+      { id: 'thumbnails', label: 'Thumbnails', description: 'Page thumbnail previews', icon: Columns, action: () => useUIStore.getState().toggleThumbnails(), category: 'Navigation' },
+      { id: 'outline', label: 'Document Outline', description: 'Table of contents', icon: List, action: () => useUIStore.getState().toggleOutline(), category: 'Navigation' },
+      { id: 'bookmark', label: isCurrentPageBookmarked ? 'Remove Bookmark' : 'Bookmark Page', description: `Page ${currentPage}`, icon: Bookmark, shortcut: 'B', action: () => toggleBookmark(doc.id, currentPage, `Page ${currentPage}`), category: 'Actions' },
+      { id: 'focus', label: focus.enabled ? 'Exit Focus Mode' : 'Enter Focus Mode', description: 'Reduce distractions', icon: focus.enabled ? EyeOff : Eye, shortcut: 'Space', action: () => focus.toggleFocus(), category: 'Reading' },
+      { id: 'rsvp', label: 'Speed Reader', description: 'RSVP inline speed reading', icon: Zap, shortcut: 'R', action: () => currentPageText.length > 0 && setShowInlineRSVP(true), category: 'Reading' },
+      { id: 'vocabulary', label: 'Vocabulary', description: 'Saved words', icon: BookOpen, shortcut: 'V', action: () => setShowVocabulary(true), category: 'Reading' },
+      { id: 'insights', label: 'Reading Insights', description: 'Session analytics', icon: BarChart3, shortcut: 'I', action: () => setShowInsights(true), category: 'Analytics' },
+      { id: 'heatmap', label: showHeatmap ? 'Hide Heatmap' : 'Show Heatmap', description: 'Reading time per page', icon: BarChart3, shortcut: 'H', action: () => setShowHeatmap((v) => !v), category: 'Analytics' },
+      { id: 'darkmode', label: isDarkMode ? 'Light Mode' : 'Dark Mode', description: 'Toggle theme', icon: isDarkMode ? Sun : Moon, action: () => setTheme(isDarkMode ? 'light' : 'dark'), category: 'Appearance' },
+      { id: 'zoomin', label: 'Zoom In', description: 'Increase page size', icon: ZoomIn, shortcut: '⌘+', action: handleZoomIn, category: 'View' },
+      { id: 'zoomout', label: 'Zoom Out', description: 'Decrease page size', icon: ZoomOut, shortcut: '⌘-', action: handleZoomOut, category: 'View' },
+      { id: 'fitwidth', label: 'Fit Width', description: 'Fit page to width', icon: Columns, shortcut: 'W', action: handleFitWidth, category: 'View' },
+      { id: 'firstpage', label: 'First Page', description: 'Go to page 1', icon: ChevronLeft, shortcut: 'Home', action: () => handlePageChange(1), category: 'Navigation' },
+      { id: 'lastpage', label: 'Last Page', description: `Go to page ${totalPages}`, icon: ChevronRight, shortcut: 'End', action: () => handlePageChange(totalPages), category: 'Navigation' },
+    ]
+  }, [doc, currentPage, totalPages, focus.enabled, isDarkMode, isCurrentPageBookmarked, showHeatmap, currentPageText, handleZoomIn, handleZoomOut, handleFitWidth, handlePageChange, setTheme, toggleBookmark, setCurrentPage])
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+
+      // Command palette
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault()
+        toggleCommandPalette()
+        return
+      }
+
       if (showInlineRSVP) return
+
       switch (e.key) {
         case 'ArrowLeft': e.preventDefault(); handlePageChange(currentPage - 1); break
         case 'ArrowRight': e.preventDefault(); handlePageChange(currentPage + 1); break
@@ -288,6 +373,7 @@ export function ReaderPage() {
         case 'f': if (e.ctrlKey || e.metaKey) { e.preventDefault(); setSearchOpen(!searchOpen) } break
         case ' ': e.preventDefault(); focus.toggleFocus(); break
         case 'Escape':
+          if (annotationSelection) { setAnnotationSelection(null); return }
           if (selectedWord) { setSelectedWord(null); return }
           if (focus.enabled) focus.setEnabled(false)
           if (searchOpen) setSearchOpen(false)
@@ -297,11 +383,12 @@ export function ReaderPage() {
         case 'v': if (!e.ctrlKey && !e.metaKey) setShowVocabulary((v) => !v); break
         case 'i': if (!e.ctrlKey && !e.metaKey) setShowInsights((v) => !v); break
         case 'h': if (!e.ctrlKey && !e.metaKey) setShowHeatmap((v) => !v); break
+        case 'b': if (!e.ctrlKey && !e.metaKey && doc) { toggleBookmark(doc.id, currentPage, `Page ${currentPage}`) } break
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [currentPage, searchOpen, focus.enabled, selectedWord, currentPageText, showInlineRSVP])
+  }, [currentPage, searchOpen, focus.enabled, selectedWord, currentPageText, showInlineRSVP, annotationSelection, doc, toggleCommandPalette])
 
   if (!doc) {
     return (
@@ -354,10 +441,13 @@ export function ReaderPage() {
         showThumbnails={thumbnailsOpen}
         onToggleThumbnails={() => useUIStore.getState().toggleThumbnails()}
         showOutline={outlineOpen}
-        onToggleOutline={() => useUIStore.getState().toggleOutline()}
+        onToggleOutline={toggleOutline}
         onToggleRSVP={() => currentPageText.length > 0 && setShowInlineRSVP(true)}
         onToggleVocabulary={() => setShowVocabulary(true)}
         onToggleInsights={() => setShowInsights(true)}
+        onToggleBookmarks={() => setShowBookmarks(true)}
+        isBookmarked={isCurrentPageBookmarked}
+        onToggleCommandPalette={toggleCommandPalette}
       />
 
       <div className="flex-1 flex overflow-hidden relative">
@@ -392,7 +482,31 @@ export function ReaderPage() {
 
           {focus.enabled && <FocusGuide containerRef={containerRef} />}
 
-          <div ref={scrollRef} className="flex-1 overflow-auto">
+          {/* Bookmark panel */}
+          <BookmarkPanel
+            isOpen={showBookmarks}
+            documentId={doc.id}
+            currentPage={currentPage}
+            totalPages={totalPages}
+            onPageSelect={(p) => { handlePageChange(p); setShowBookmarks(false) }}
+            onClose={() => setShowBookmarks(false)}
+          />
+
+          {/* Outline panel */}
+          {pdf && (
+            <PDFOutlinePanel
+              isOpen={outlineOpen}
+              pdf={pdf}
+              onPageSelect={handlePageChange}
+              onClose={toggleOutline}
+            />
+          )}
+
+          <div
+            ref={scrollRef}
+            className="flex-1 overflow-auto"
+            onMouseUp={handleTextSelection}
+          >
             <div className="h-6" />
 
             {loading && (
@@ -417,6 +531,7 @@ export function ReaderPage() {
                   const isNearby = Math.abs(page - currentPage) <= VIRTUALIZATION_BUFFER
                   const dim = pageDimensions[page]
                   const w = dim ? dim.width : 612 * scale
+                  const h = dim ? dim.height : 792 * scale
 
                   return (
                     <div
@@ -440,19 +555,28 @@ export function ReaderPage() {
                         }}
                       >
                         {isNearby ? (
-                          <PDFPageRenderer
-                            pdf={pdf}
-                            pageNumber={page}
-                            scale={scale}
-                            isVisible={true}
-                            isCurrentPage={page === currentPage}
-                            isDarkMode={isDarkMode}
-                            rsvpActive={showInlineRSVP}
-                            onTextExtracted={handleTextExtracted}
-                            onDimensionsReady={handleDimensionsReady}
-                            onWordsExtracted={handleWordsExtracted}
-                            onPageClick={handlePageClick}
-                          />
+                          <>
+                            <PDFPageRenderer
+                              pdf={pdf}
+                              pageNumber={page}
+                              scale={scale}
+                              isVisible={true}
+                              isCurrentPage={page === currentPage}
+                              isDarkMode={isDarkMode}
+                              rsvpActive={showInlineRSVP}
+                              onTextExtracted={handleTextExtracted}
+                              onDimensionsReady={handleDimensionsReady}
+                              onWordsExtracted={handleWordsExtracted}
+                              onPageClick={handlePageClick}
+                            />
+                            {/* Annotation highlights */}
+                            <AnnotationLayer
+                              documentId={doc.id}
+                              pageNumber={page}
+                              pageWidth={w}
+                              pageHeight={h}
+                            />
+                          </>
                         ) : (
                           <div style={{ width: 612 * scale, height: 792 * scale }} className={isDarkMode ? 'bg-[#1a1a2e]' : 'bg-[var(--color-surface-2)]'} />
                         )}
@@ -515,6 +639,21 @@ export function ReaderPage() {
         )}
       </AnimatePresence>
 
+      {/* Annotation toolbar */}
+      <AnimatePresence>
+        {annotationSelection && (
+          <AnnotationToolbar
+            documentId={doc.id}
+            pageNumber={currentPage}
+            selectedText={annotationSelection.text}
+            rects={annotationSelection.rects}
+            screenX={annotationSelection.screenX}
+            screenY={annotationSelection.screenY}
+            onClose={() => setAnnotationSelection(null)}
+          />
+        )}
+      </AnimatePresence>
+
       {/* Inline RSVP speed reader */}
       <AnimatePresence>
         {showInlineRSVP && currentPageText.length > 0 && (
@@ -537,6 +676,13 @@ export function ReaderPage() {
         currentPage={currentPage}
         totalPages={totalPages}
         pageTimes={pageTimes}
+      />
+
+      {/* Command Palette */}
+      <CommandPalette
+        isOpen={commandPaletteOpen}
+        onClose={toggleCommandPalette}
+        commands={commands}
       />
 
       <AnimatePresence>

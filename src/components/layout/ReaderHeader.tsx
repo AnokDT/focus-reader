@@ -9,6 +9,8 @@ import {
   List,
   Zap,
   BookOpen,
+  Bookmark,
+  Command,
 } from 'lucide-react'
 import { useUIStore } from '@/stores/uiStore'
 import { Button } from '@/components/ui/Button'
@@ -33,6 +35,9 @@ interface ReaderHeaderProps {
   onToggleRSVP: () => void
   onToggleVocabulary: () => void
   onToggleInsights: () => void
+  onToggleBookmarks: () => void
+  isBookmarked: boolean
+  onToggleCommandPalette: () => void
 }
 
 export function ReaderHeader({
@@ -53,6 +58,9 @@ export function ReaderHeader({
   onToggleRSVP,
   onToggleVocabulary,
   onToggleInsights,
+  onToggleBookmarks,
+  isBookmarked,
+  onToggleCommandPalette,
 }: ReaderHeaderProps) {
   return (
     <header className="h-12 border-b border-[var(--color-surface-3)] bg-[var(--color-surface-1)] flex items-center justify-between px-4 shrink-0 theme-transition z-20">
@@ -114,6 +122,9 @@ export function ReaderHeader({
         <Tooltip content="Speed reader (R)">
           <Button variant="ghost" size="sm" onClick={onToggleRSVP} icon={<Zap size={15} />} />
         </Tooltip>
+        <Tooltip content={`Bookmark (B)`}>
+          <Button variant={isBookmarked ? 'secondary' : 'ghost'} size="sm" onClick={onToggleBookmarks} icon={<Bookmark size={15} fill={isBookmarked ? 'currentColor' : 'none'} />} />
+        </Tooltip>
         <Tooltip content="My vocabulary (V)">
           <Button variant="ghost" size="sm" onClick={onToggleVocabulary} icon={<BookOpen size={15} />} />
         </Tooltip>
@@ -126,6 +137,9 @@ export function ReaderHeader({
 
         <div className="w-px h-5 bg-[var(--color-surface-3)] mx-1" />
 
+        <Tooltip content="Command palette (⌘K)">
+          <Button variant="ghost" size="sm" onClick={onToggleCommandPalette} icon={<Command size={15} />} />
+        </Tooltip>
         <Tooltip content={isFocusMode ? 'Exit focus mode (Space)' : 'Focus mode (Space)'}>
           <Button variant={isFocusMode ? 'primary' : 'ghost'} size="sm" onClick={onToggleFocus} icon={isFocusMode ? <EyeOff size={15} /> : <Eye size={15} />} />
         </Tooltip>
