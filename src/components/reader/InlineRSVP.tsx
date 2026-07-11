@@ -77,13 +77,12 @@ export function InlineRSVP({
   const controlsTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   const prevTextRef = useRef(text)
   const autoPlayRef = useRef(autoPlay)
-  const scrollLockRef = useRef(false)
-  const scrollingRef = useRef(false)
+  const scrollCooldownRef = useRef(false)
+  const lastScrollTopRef = useRef(0)
   const displayPageRef = useRef(pageNumber || 1)
 
   autoPlayRef.current = autoPlay
-  // Track display page separately to avoid flicker
-  if (pageNumber) displayPageRef.current = pageNumber
+  if (pageNumber !== undefined) displayPageRef.current = pageNumber
 
   const posMap = useMemo(() => buildPositionMap(tokens, wordPositions), [tokens, wordPositions])
 
@@ -93,10 +92,9 @@ export function InlineRSVP({
       prevTextRef.current = text
       setCurrentIndex(0)
       setIsTransitioning(false)
-      scrollLockRef.current = false
-      scrollingRef.current = false
+      scrollCooldownRef.current = false
       if (autoPlayRef.current) {
-        setTimeout(() => setIsPlaying(true), 200)
+        setTimeout(() => setIsPlaying(true), 300)
       }
     }
   }, [text])
@@ -105,60 +103,49 @@ export function InlineRSVP({
   const currentPos = posMap.get(currentIndex)
   const progress = tokens.length > 0 ? (currentIndex / tokens.length) * 100 : 0
 
-  // Calculate highlight screen position — only when NOT scrolling
-  const highlight = useMemo(() => {
-    if (currentIndex >= tokens.length || !pageContainerRef?.current || !currentPos) return null
-    if (scrollingRef.current) return null // skip during scroll to avoid feedback loop
-
+  // Get word's position relative to the scroll container
+  const getWordYInScrollContainer = useCallback((): number | null => {
+    if (!currentPos || !pageContainerRef?.current) return null
     const pageRect = pageContainerRef.current.getBoundingClientRect()
-    return {
-      screenX: pageRect.left + currentPos.x,
-      screenY: pageRect.top + currentPos.y,
-      width: currentPos.width,
-      height: currentPos.height,
-    }
-  }, [currentIndex, currentPos, pageContainerRef])
+    const scrollContainer = pageContainerRef.current.closest('[class*="overflow-auto"]') as HTMLElement | null
+    if (!scrollContainer) return null
+    const scrollRect = scrollContainer.getBoundingClientRect()
+    // Word's position relative to scroll container's visible area + current scroll
+    return pageRect.top - scrollRect.top + currentPos.y - scrollContainer.scrollTop
+  }, [currentPos, pageContainerRef])
 
-  // Auto-scroll: keep highlight in the upper 30-50% of the viewport
+  // AUTO-SCROLL: only scroll DOWN when highlight goes below 55% of viewport
   useEffect(() => {
-    if (!highlight || isTransitioning || scrollLockRef.current) return
+    if (isTransitioning || scrollCooldownRef.current || !isPlaying) return
+    const wordY = getWordYInScrollContainer()
+    if (wordY === null) return
+
     const scrollContainer = pageContainerRef?.current?.closest('[class*="overflow-auto"]') as HTMLElement | null
     if (!scrollContainer) return
 
-    const scrollRect = scrollContainer.getBoundingClientRect()
-    const viewportHeight = scrollRect.height
-    const highlightOnScreen = highlight.screenY - scrollRect.top
+    const viewportHeight = scrollContainer.clientHeight
 
-    const targetZone = viewportHeight * 0.4 // keep at 40% from top
+    // Only scroll DOWN when word is below the comfortable reading zone
+    if (wordY > viewportHeight * 0.55) {
+      // Scroll down to bring the word to ~35% from top
+      const targetScrollTop = scrollContainer.scrollTop + wordY - viewportHeight * 0.35
 
-    // Only scroll if highlight is outside the comfortable zone
-    if (highlightOnScreen > viewportHeight * 0.55) {
-      // Too low — scroll down
-      const scrollAmount = highlightOnScreen - targetZone
-      scrollLockRef.current = true
-      scrollingRef.current = true
-      scrollContainer.scrollBy({ top: scrollAmount, behavior: 'smooth' })
+      // Don't scroll if we're already near the target
+      if (Math.abs(targetScrollTop - scrollContainer.scrollTop) < 10) return
+
+      scrollCooldownRef.current = true
+      scrollContainer.scrollTo({
+        top: targetScrollTop,
+        behavior: 'smooth',
+      })
+
+      // Cooldown to let smooth scroll settle
       setTimeout(() => {
-        scrollLockRef.current = false
-        scrollingRef.current = false
-        forceUpdateRsvp((n) => n + 1)
-      }, 300)
-    } else if (highlightOnScreen < viewportHeight * 0.25) {
-      // Too high — scroll up
-      const scrollAmount = highlightOnScreen - targetZone
-      scrollLockRef.current = true
-      scrollingRef.current = true
-      scrollContainer.scrollBy({ top: scrollAmount, behavior: 'smooth' })
-      setTimeout(() => {
-        scrollLockRef.current = false
-        scrollingRef.current = false
-        forceUpdateRsvp((n) => n + 1)
-      }, 300)
+        scrollCooldownRef.current = false
+      }, 350)
     }
-  }, [highlight, isTransitioning, pageContainerRef])
-
-  // Force re-render helper (replaces the old forceUpdate pattern)
-  const [, forceUpdateRsvp] = useState(0)
+    // NEVER scroll up — let the words flow naturally from top to bottom
+  }, [currentIndex, isPlaying, isTransitioning, getWordYInScrollContainer, pageContainerRef])
 
   // Auto-advance to next page
   const advanceToNextPage = useCallback(() => {
@@ -249,19 +236,31 @@ export function InlineRSVP({
     return () => window.removeEventListener('mousemove', handleMove)
   }, [])
 
+  // Calculate highlight screen position for rendering
+  const highlightScreen = useMemo(() => {
+    if (currentIndex >= tokens.length || !pageContainerRef?.current || !currentPos) return null
+    const pageRect = pageContainerRef.current.getBoundingClientRect()
+    return {
+      x: pageRect.left + currentPos.x,
+      y: pageRect.top + currentPos.y,
+      w: Math.max(currentPos.width, 30),
+      h: Math.max(currentPos.height, 14),
+    }
+  }, [currentIndex, currentPos, pageContainerRef])
+
   const hasNextPage = (pageNumber || 0) < (totalPages || 0)
 
   return (
     <>
-      {/* Highlight — follows the word */}
-      {highlight && !isTransitioning && (
+      {/* Highlight on the word */}
+      {highlightScreen && !isTransitioning && (
         <div
           className="fixed pointer-events-none"
           style={{
-            left: highlight.screenX,
-            top: highlight.screenY,
-            width: Math.max(highlight.width, 30),
-            height: Math.max(highlight.height, 14),
+            left: highlightScreen.x,
+            top: highlightScreen.y,
+            width: highlightScreen.w,
+            height: highlightScreen.h,
             zIndex: 55,
           }}
         >
@@ -276,7 +275,7 @@ export function InlineRSVP({
         </div>
       )}
 
-      {/* Floating control bar */}
+      {/* Control bar */}
       <AnimatePresence>
         {showControls && (
           <motion.div
@@ -284,11 +283,10 @@ export function InlineRSVP({
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 20 }}
-            transition={{ duration: 0.2, ease: [0.25, 0.1, 0.25, 1] }}
+            transition={{ duration: 0.2 }}
             className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[70]"
           >
             <div className="bg-[var(--color-surface-0)]/95 backdrop-blur-2xl border border-[var(--color-surface-3)] rounded-2xl shadow-[0_8px_40px_rgba(0,0,0,0.15)] overflow-hidden">
-              {/* Progress */}
               <div className="px-5 pt-3">
                 <div className="relative h-1 bg-[var(--color-surface-3)] rounded-full overflow-hidden">
                   <motion.div
@@ -307,16 +305,15 @@ export function InlineRSVP({
                 </div>
               </div>
 
-              {/* Controls */}
               <div className="px-5 py-3 flex items-center justify-between">
                 <div className="flex items-center gap-1.5">
-                  <button onClick={() => setWpm((w) => Math.max(100, w - 25))} className="p-1.5 rounded-lg text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text-primary)] transition-colors">
+                  <button onClick={() => setWpm((w) => Math.max(100, w - 25))} className="p-1.5 rounded-lg text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-2)] transition-colors">
                     <Minus size={14} />
                   </button>
                   <span className="text-xs font-semibold text-[var(--color-accent)] tabular-nums w-14 text-center">
                     {wpm} <span className="text-[9px] font-normal text-[var(--color-text-tertiary)]">WPM</span>
                   </span>
-                  <button onClick={() => setWpm((w) => Math.min(800, w + 25))} className="p-1.5 rounded-lg text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text-primary)] transition-colors">
+                  <button onClick={() => setWpm((w) => Math.min(800, w + 25))} className="p-1.5 rounded-lg text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-2)] transition-colors">
                     <Plus size={14} />
                   </button>
                 </div>
@@ -341,12 +338,11 @@ export function InlineRSVP({
                     <button
                       onClick={handleSkipToEnd}
                       className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium text-[var(--color-accent)] hover:bg-[var(--color-accent-muted)] transition-colors"
-                      title="Skip to next page (N)"
                     >
-                      Next page <ChevronRight size={12} />
+                      Next <ChevronRight size={12} />
                     </button>
                   )}
-                  <button onClick={onClose} className="p-1.5 rounded-lg text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text-primary)] transition-colors">
+                  <button onClick={onClose} className="p-1.5 rounded-lg text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-2)] transition-colors">
                     <X size={14} />
                   </button>
                 </div>
