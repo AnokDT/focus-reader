@@ -5,6 +5,7 @@ import { useAnalyticsStore } from '@/stores/analyticsStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { formatDuration } from '@/utils/dateUtils'
 import { ProgressBar } from '@/components/ui/ProgressBar'
+import { ReadingCalendar } from '@/components/analytics/ReadingCalendar'
 
 function StatsCard({ icon, label, value, subtext }: { icon: React.ReactNode; label: string; value: string; subtext?: string }) {
   return (
@@ -135,6 +136,10 @@ export function StatsPage() {
               )
             })}
           </div>
+        </div>
+
+        <div className="bg-[var(--color-surface-1)] rounded-xl p-5 border border-[var(--color-surface-3)] theme-transition">
+          <ReadingCalendar />
         </div>
       </div>
     </div>

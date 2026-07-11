@@ -11,9 +11,10 @@ interface ReadingInsightsProps {
   currentPage: number
   totalPages: number
   pageTimes: Record<number, number>
+  pageTexts?: Record<number, string>
 }
 
-export function ReadingInsights({ isOpen, onClose, currentPage, totalPages, pageTimes }: ReadingInsightsProps) {
+export function ReadingInsights({ isOpen, onClose, currentPage, totalPages, pageTimes, pageTexts }: ReadingInsightsProps) {
   const { getTodayStats, getStreak } = useAnalyticsStore()
   const todayStats = getTodayStats()
   const streak = getStreak()
@@ -28,6 +29,25 @@ export function ReadingInsights({ isOpen, onClose, currentPage, totalPages, page
     const unreadCount = totalPages - readCount
     const estimatedTimeLeft = unreadCount * avgTimePerPage
 
+    // Calculate actual WPM from word counts and time
+    let totalWordsRead = 0
+    let totalTimeMs = 0
+    if (pageTexts) {
+      for (const [pageStr, timeMs] of Object.entries(pageTimes)) {
+        if (timeMs > 0) {
+          const page = parseInt(pageStr)
+          const text = pageTexts[page] || ''
+          const wordCount = text.split(/\s+/).filter((w) => w.length > 0).length
+          totalWordsRead += wordCount
+          totalTimeMs += timeMs
+        }
+      }
+    }
+    const totalTimeMinutes = totalTimeMs / 60000
+    const readingSpeed = totalTimeMinutes > 0.05 && totalWordsRead > 0
+      ? Math.round(totalWordsRead / totalTimeMinutes)
+      : 0
+
     return {
       avgTimePerPage,
       fastestPage,
@@ -35,9 +55,9 @@ export function ReadingInsights({ isOpen, onClose, currentPage, totalPages, page
       readCount,
       unreadCount,
       estimatedTimeLeft,
-      readingSpeed: avgTimePerPage > 0 ? Math.round(250 / (avgTimePerPage / 1000)) : 0,
+      readingSpeed,
     }
-  }, [pageTimes, totalPages])
+  }, [pageTimes, totalPages, pageTexts])
 
   return (
     <AnimatePresence>

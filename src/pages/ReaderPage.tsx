@@ -28,9 +28,15 @@ import { BookmarkPanel } from '@/components/reader/BookmarkPanel'
 import { AnnotationToolbar } from '@/components/reader/AnnotationToolbar'
 import { AnnotationLayer } from '@/components/reader/AnnotationLayer'
 import { CommandPalette } from '@/components/reader/CommandPalette'
+import { TextToSpeech } from '@/components/reader/TextToSpeech'
+import { PomodoroTimer } from '@/components/reader/PomodoroTimer'
+import { AchievementPopup } from '@/components/reader/AchievementPopup'
+import { useExportNotes } from '@/components/reader/ExportNotes'
+import { useAchievementStore } from '@/stores/achievementStore'
 import {
   Eye, EyeOff, Zap, BookOpen, BarChart3, Settings, Columns, List,
   Moon, Sun, Bookmark, Search, Command, ZoomIn, ZoomOut, ChevronLeft, ChevronRight,
+  Volume2, Timer, Trophy, Download,
 } from 'lucide-react'
 
 interface PageDimensions {
@@ -69,6 +75,9 @@ export function ReaderPage() {
   const [showHeatmap, setShowHeatmap] = useState(true)
   const [showInsights, setShowInsights] = useState(false)
   const [showBookmarks, setShowBookmarks] = useState(false)
+  const [showTTS, setShowTTS] = useState(false)
+  const [showPomodoro, setShowPomodoro] = useState(false)
+  const [showAchievements, setShowAchievements] = useState(false)
   const [pageTimes, setPageTimes] = useState<Record<number, number>>({})
 
   // Annotation state
@@ -86,11 +95,20 @@ export function ReaderPage() {
   const currentPageRef = useRef(1)
   const pageTimesRef = useRef<Record<number, number>>({})
   const currentPageContainerRef = useRef<HTMLDivElement | null>(null)
+  const pageTextsRef = useRef<Record<number, string>>({})
 
   const isDarkMode = theme === 'dark'
   const hasBookmark = useBookmarkStore((s) => s.hasBookmark)
   const toggleBookmark = useBookmarkStore((s) => s.toggleBookmark)
   const isCurrentPageBookmarked = doc ? hasBookmark(doc.id, currentPage) : false
+
+  const { downloadMarkdown } = useExportNotes({
+    documentId: doc?.id || '',
+    documentTitle: doc?.title || '',
+    totalPages,
+  })
+
+  const checkAndUnlock = useAchievementStore((s) => s.checkAndUnlock)
 
   // Consolidated time tracking
   useEffect(() => {
@@ -108,6 +126,20 @@ export function ReaderPage() {
         }
         setPageTimes({ ...pageTimesRef.current })
         lastFlushTime = now
+
+        // Check achievements periodically
+        checkAndUnlock({
+          totalPagesRead: Object.keys(pageTimesRef.current).filter((p) => pageTimesRef.current[parseInt(p)] > 0).length,
+          totalReadingTimeMs: Object.values(pageTimesRef.current).reduce((a, b) => a + b, 0),
+          currentStreak: 0,
+          longestStreak: 0,
+          totalSessions: 1,
+          documentsRead: 1,
+          maxWpm: 0,
+          bookmarksCount: useBookmarkStore.getState().bookmarks.length,
+          annotationsCount: useAnnotationStore.getState().annotations.length,
+          vocabularyCount: 0,
+        })
       }
     }, 2000)
 
@@ -151,7 +183,23 @@ export function ReaderPage() {
       }
     }
     loadPdf()
-    return () => { endSession(250) }
+    return () => {
+      // Calculate real WPM from session data before ending
+      const times = pageTimesRef.current
+      const texts = pageTextsRef.current
+      let totalWords = 0
+      let totalTimeMs = 0
+      for (const [pageStr, timeMs] of Object.entries(times)) {
+        if (timeMs > 0) {
+          const text = texts[parseInt(pageStr)] || ''
+          totalWords += text.split(/\s+/).filter((w) => w.length > 0).length
+          totalTimeMs += timeMs
+        }
+      }
+      const minutes = totalTimeMs / 60000
+      const wpm = minutes > 0.05 && totalWords > 0 ? Math.round(totalWords / minutes) : 0
+      endSession(wpm)
+    }
   }, [id])
 
   useEffect(() => {
@@ -218,7 +266,11 @@ export function ReaderPage() {
   }, [])
 
   const handleTextExtracted = useCallback((pageNumber: number, text: string) => {
-    setPageTexts((prev) => ({ ...prev, [pageNumber]: text }))
+    setPageTexts((prev) => {
+      const next = { ...prev, [pageNumber]: text }
+      pageTextsRef.current = next
+      return next
+    })
   }, [])
 
   const handleDimensionsReady = useCallback((pageNumber: number, width: number, height: number) => {
@@ -347,6 +399,10 @@ export function ReaderPage() {
       { id: 'fitwidth', label: 'Fit Width', description: 'Fit page to width', icon: Columns, shortcut: 'W', action: handleFitWidth, category: 'View' },
       { id: 'firstpage', label: 'First Page', description: 'Go to page 1', icon: ChevronLeft, shortcut: 'Home', action: () => handlePageChange(1), category: 'Navigation' },
       { id: 'lastpage', label: 'Last Page', description: `Go to page ${totalPages}`, icon: ChevronRight, shortcut: 'End', action: () => handlePageChange(totalPages), category: 'Navigation' },
+      { id: 'tts', label: 'Text to Speech', description: 'Read page aloud', icon: Volume2, shortcut: 'T', action: () => setShowTTS(true), category: 'Reading' },
+      { id: 'pomodoro', label: 'Pomodoro Timer', description: 'Focus reading timer', icon: Timer, shortcut: 'P', action: () => setShowPomodoro(true), category: 'Reading' },
+      { id: 'achievements', label: 'Achievements', description: 'View unlocked badges', icon: Trophy, action: () => setShowAchievements(true), category: 'Reading' },
+      { id: 'export', label: 'Export Notes', description: 'Download highlights as Markdown', icon: Download, action: () => downloadMarkdown(), category: 'Actions' },
     ]
   }, [doc, currentPage, totalPages, focus.enabled, isDarkMode, isCurrentPageBookmarked, showHeatmap, currentPageText, handleZoomIn, handleZoomOut, handleFitWidth, handlePageChange, setTheme, toggleBookmark, setCurrentPage])
 
@@ -384,6 +440,8 @@ export function ReaderPage() {
         case 'i': if (!e.ctrlKey && !e.metaKey) setShowInsights((v) => !v); break
         case 'h': if (!e.ctrlKey && !e.metaKey) setShowHeatmap((v) => !v); break
         case 'b': if (!e.ctrlKey && !e.metaKey && doc) { toggleBookmark(doc.id, currentPage, `Page ${currentPage}`) } break
+        case 't': if (!e.ctrlKey && !e.metaKey) setShowTTS((v) => !v); break
+        case 'p': if (!e.ctrlKey && !e.metaKey) setShowPomodoro((v) => !v); break
       }
     }
     window.addEventListener('keydown', handleKeyDown)
@@ -676,6 +734,7 @@ export function ReaderPage() {
         currentPage={currentPage}
         totalPages={totalPages}
         pageTimes={pageTimes}
+        pageTexts={pageTexts}
       />
 
       {/* Command Palette */}
@@ -684,6 +743,23 @@ export function ReaderPage() {
         onClose={toggleCommandPalette}
         commands={commands}
       />
+
+      {/* Text to Speech */}
+      <TextToSpeech
+        text={currentPageText}
+        isOpen={showTTS}
+        onClose={() => setShowTTS(false)}
+        pageNumber={currentPage}
+        totalPages={totalPages}
+        onNextPage={() => handlePageChange(currentPage + 1)}
+        onPrevPage={() => handlePageChange(currentPage - 1)}
+      />
+
+      {/* Pomodoro Timer */}
+      <PomodoroTimer isOpen={showPomodoro} onClose={() => setShowPomodoro(false)} />
+
+      {/* Achievements */}
+      <AchievementPopup isOpen={showAchievements} onClose={() => setShowAchievements(false)} />
 
       <AnimatePresence>
         {focus.enabled && <FocusControls isVisible={focus.enabled} />}
