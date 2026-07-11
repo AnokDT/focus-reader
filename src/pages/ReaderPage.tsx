@@ -63,39 +63,42 @@ export function ReaderPage() {
   const observerRef = useRef<IntersectionObserver | null>(null)
   const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map())
   const currentPageRef = useRef(1)
-  const pageEnterTime = useRef<number>(Date.now())
   const pageTimesRef = useRef<Record<number, number>>({})
 
   const isDarkMode = theme === 'dark'
 
-  // Track time spent on each page (ignore sessions under 3 seconds)
+  // Consolidated time tracking: live-updates display every 2s, saves on page change
   useEffect(() => {
     const pageAtStart = currentPage
-    pageEnterTime.current = Date.now()
-    return () => {
-      const timeSpent = Date.now() - pageEnterTime.current
-      if (pageAtStart > 0 && timeSpent >= 3000) {
+    const enterTime = Date.now()
+    let lastFlushTime = enterTime
+
+    // Live-update heatmap display every 2 seconds
+    const interval = setInterval(() => {
+      const now = Date.now()
+      const elapsed = now - lastFlushTime
+      if (pageAtStart > 0 && elapsed >= 1000) {
         pageTimesRef.current = {
           ...pageTimesRef.current,
-          [pageAtStart]: (pageTimesRef.current[pageAtStart] || 0) + timeSpent,
+          [pageAtStart]: (pageTimesRef.current[pageAtStart] || 0) + elapsed,
+        }
+        setPageTimes({ ...pageTimesRef.current })
+        lastFlushTime = now
+      }
+    }, 2000)
+
+    return () => {
+      clearInterval(interval)
+      // Final flush: accumulate remaining time since last interval
+      const elapsed = Date.now() - lastFlushTime
+      if (pageAtStart > 0 && (Date.now() - enterTime) >= 3000) {
+        pageTimesRef.current = {
+          ...pageTimesRef.current,
+          [pageAtStart]: (pageTimesRef.current[pageAtStart] || 0) + elapsed,
         }
         setPageTimes({ ...pageTimesRef.current })
       }
     }
-  }, [currentPage])
-
-  // Live-update heatmap for current page (every 2 seconds)
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const timeSpent = Date.now() - pageEnterTime.current
-      if (currentPage > 0 && timeSpent >= 3000) {
-        setPageTimes({
-          ...pageTimesRef.current,
-          [currentPage]: (pageTimesRef.current[currentPage] || 0) + timeSpent,
-        })
-      }
-    }, 2000)
-    return () => clearInterval(interval)
   }, [currentPage])
 
   // PDF loading

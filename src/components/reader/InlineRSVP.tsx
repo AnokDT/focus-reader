@@ -79,7 +79,7 @@ export function InlineRSVP({ text, positions, onClose }: InlineRSVPProps) {
   const currentWord = tokens[currentIndex] || ''
   const progress = tokens.length > 0 ? (currentIndex / tokens.length) * 100 : 0
 
-  // Get position for current word
+  // Get position for current word (positions are viewport-relative percentages)
   const currentPosition = useMemo(() => {
     if (positions.length === 0 || currentIndex >= tokens.length) return null
     const mapping = wordPositionMap.get(currentIndex)
@@ -187,12 +187,14 @@ export function InlineRSVP({ text, positions, onClose }: InlineRSVPProps) {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.08 }}
-            className="fixed pointer-events-none z-[60]"
+            className="fixed pointer-events-none"
             style={{
               left: `${currentPosition.x * 100}%`,
               top: `${currentPosition.y * 100}%`,
               width: `${Math.max(currentPosition.width * 100, 3)}%`,
               height: `${Math.max(currentPosition.height * 100, 2)}%`,
+              zIndex: 50,
+              transform: 'translate(-50%, -50%)',
             }}
           >
             <div
