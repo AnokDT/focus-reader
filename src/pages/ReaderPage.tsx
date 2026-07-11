@@ -335,7 +335,7 @@ export function ReaderPage() {
     if (closestWord && closestWord.word.length >= 2) {
       const cleanWord = closestWord.word.replace(/[^\p{L}\p{N}]/gu, '').trim()
       if (cleanWord.length >= 2) {
-        // Find the token index that matches this word in the page text
+        // Find the token index for RSVP
         const pageText = pageTexts[pageNumber] || ''
         const tokenRegex = /[\p{L}\p{N}]+/gu
         let tokenIdx = 0
@@ -348,14 +348,9 @@ export function ReaderPage() {
           }
           tokenIdx++
         }
-
         setRsvpStartIndex(foundTokenIndex)
-        // If RSVP is not open, open it and start from this word
-        if (!showInlineRSVPRef.current) {
-          setShowInlineRSVP(true)
-          return
-        }
-        // If RSVP is already open, show dictionary popup
+
+        // Always show dictionary popup on click
         const pageEl = pageRefs.current.get(pageNumber)
         const pageRect = pageEl?.getBoundingClientRect()
         if (pageRect) {
@@ -759,6 +754,10 @@ export function ReaderPage() {
             onClose={() => setSelectedWord(null)}
             documentId={doc.id}
             pageNumber={currentPage}
+            onStartRSVP={() => {
+              setSelectedWord(null)
+              setShowInlineRSVP(true)
+            }}
           />
         )}
       </AnimatePresence>

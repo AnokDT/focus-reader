@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { BookOpen, Plus, Check, Volume2, X, Loader2 } from 'lucide-react'
+import { BookOpen, Plus, Check, Volume2, X, Loader2, Zap } from 'lucide-react'
 import { lookupWord, type DictionaryResult } from '@/services/dictionaryService'
 import { useVocabularyStore } from '@/stores/vocabularyStore'
 
@@ -11,9 +11,10 @@ interface WordPopupProps {
   onClose: () => void
   documentId?: string
   pageNumber?: number
+  onStartRSVP?: () => void
 }
 
-export function WordPopup({ word, x, y, onClose, documentId, pageNumber }: WordPopupProps) {
+export function WordPopup({ word, x, y, onClose, documentId, pageNumber, onStartRSVP }: WordPopupProps) {
   const [result, setResult] = useState<DictionaryResult | null>(null)
   const [loading, setLoading] = useState(true)
   const [saved, setSaved] = useState(false)
@@ -159,7 +160,16 @@ export function WordPopup({ word, x, y, onClose, documentId, pageNumber }: WordP
 
         {/* Footer */}
         {!loading && result && (
-          <div className="px-4 py-2.5 border-t border-[var(--color-surface-3)] bg-[var(--color-surface-1)]">
+          <div className="px-4 py-2.5 border-t border-[var(--color-surface-3)] bg-[var(--color-surface-1)] space-y-2">
+            {onStartRSVP && (
+              <button
+                onClick={() => { onClose(); onStartRSVP() }}
+                className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium bg-gradient-to-r from-[var(--color-accent)] to-purple-500 text-white hover:opacity-90 active:scale-[0.98] transition-all"
+              >
+                <Zap size={14} />
+                Start speed reading from here
+              </button>
+            )}
             <button
               onClick={handleSave}
               disabled={saved}
@@ -167,7 +177,7 @@ export function WordPopup({ word, x, y, onClose, documentId, pageNumber }: WordP
                 w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all
                 ${saved
                   ? 'bg-[var(--color-success)]/10 text-[var(--color-success)] cursor-default'
-                  : 'bg-[var(--color-accent)] text-white hover:bg-[var(--color-accent-hover)] active:scale-[0.98]'
+                  : 'bg-[var(--color-surface-2)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-3)] active:scale-[0.98]'
                 }
               `}
             >

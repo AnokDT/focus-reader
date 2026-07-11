@@ -287,12 +287,28 @@ export function InlineRSVP({
             zIndex: 55,
           }}
         >
+          {/* Outer glow */}
+          <div
+            className="absolute -inset-[10px] rounded-lg"
+            style={{
+              background: 'rgba(var(--color-accent-rgb, 59, 130, 246), 0.15)',
+              boxShadow: '0 0 40px 8px rgba(var(--color-accent-rgb, 59, 130, 246), 0.3)',
+            }}
+          />
+          {/* Main highlight */}
           <div
             className="absolute -inset-[6px] rounded-lg"
             style={{
-              background: 'rgba(var(--color-accent-rgb, 59, 130, 246), 0.2)',
-              border: '2px solid var(--color-accent)',
-              boxShadow: '0 0 20px rgba(var(--color-accent-rgb, 59, 130, 246), 0.35)',
+              background: 'rgba(var(--color-accent-rgb, 59, 130, 246), 0.35)',
+              border: '3px solid var(--color-accent)',
+              boxShadow: '0 0 24px 4px rgba(var(--color-accent-rgb, 59, 130, 246), 0.4), inset 0 0 12px rgba(var(--color-accent-rgb, 59, 130, 246), 0.15)',
+            }}
+          />
+          {/* Inner pulse */}
+          <div
+            className="absolute -inset-[6px] rounded-lg animate-pulse"
+            style={{
+              background: 'rgba(var(--color-accent-rgb, 59, 130, 246), 0.1)',
             }}
           />
         </div>
