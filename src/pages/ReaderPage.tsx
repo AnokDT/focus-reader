@@ -204,7 +204,11 @@ export function ReaderPage() {
   }, [])
 
   const handleWordSelect = useCallback((word: string, x: number, y: number) => {
-    if (word.length >= 2) setSelectedWord({ word, x, y })
+    // Only popup for single words or short phrases (max 5 words)
+    const cleanWord = word.replace(/[^\p{L}\p{N}]/gu, '').trim()
+    if (cleanWord.length >= 2 && cleanWord.split(/\s+/).length <= 5) {
+      setSelectedWord({ word: cleanWord, x, y })
+    }
   }, [])
 
   const handleSearch = useCallback(
@@ -405,6 +409,7 @@ export function ReaderPage() {
                             pageNumber={page}
                             scale={scale}
                             isVisible={true}
+                            isCurrentPage={page === currentPage}
                             isDarkMode={isDarkMode}
                             onTextExtracted={handleTextExtracted}
                             onDimensionsReady={handleDimensionsReady}

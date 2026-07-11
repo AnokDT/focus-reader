@@ -6,6 +6,7 @@ interface PDFPageRendererProps {
   pageNumber: number
   scale: number
   isVisible: boolean
+  isCurrentPage?: boolean
   isDarkMode?: boolean
   onTextExtracted?: (pageNumber: number, text: string) => void
   onDimensionsReady?: (pageNumber: number, width: number, height: number) => void
@@ -29,6 +30,7 @@ export function PDFPageRenderer({
   pageNumber,
   scale,
   isVisible,
+  isCurrentPage = false,
   isDarkMode = false,
   onTextExtracted,
   onDimensionsReady,
@@ -42,6 +44,68 @@ export function PDFPageRenderer({
   const renderTaskRef = useRef<any>(null)
   const [pageWidth, setPageWidth] = useState(0)
   const [pageHeight, setPageHeight] = useState(0)
+  const textContentRef = useRef<any>(null)
+  const viewportRef = useRef<any>(null)
+
+  // Build text layer DOM from cached content
+  const buildTextLayer = useCallback((content: any, vp: any) => {
+    if (!textLayerRef.current) return
+    const textLayer = textLayerRef.current
+    textLayer.innerHTML = ''
+
+    content.items.forEach((item: any) => {
+      if (!item.str || !item.transform) return
+      const tx = applyTransform(vp.transform, item.transform)
+      const screenX = tx[4]
+      const screenY = tx[5]
+      const fontHeight = Math.abs(tx[3]) || Math.abs(tx[0])
+      const itemWidth = item.width * scale || item.str.length * fontHeight * 0.5
+
+      const left = (screenX / vp.width) * 100
+      const top = (screenY / vp.height) * 100
+      const widthPct = (itemWidth / vp.width) * 100
+      const heightPct = (fontHeight / vp.height) * 100
+
+      const span = window.document.createElement('span')
+      span.textContent = item.str
+      span.setAttribute('data-text', item.str)
+      span.style.position = 'absolute'
+      span.style.left = `${left}%`
+      span.style.top = `${top}%`
+      span.style.width = `${widthPct}%`
+      span.style.height = `${heightPct}%`
+      span.style.fontSize = `${fontHeight * 0.9}px`
+      span.style.fontFamily = 'sans-serif'
+      span.style.lineHeight = '1.1'
+      span.style.whiteSpace = 'pre'
+      span.style.color = 'transparent'
+      span.style.cursor = 'text'
+      span.style.userSelect = 'text'
+      span.style.webkitUserSelect = 'text'
+      span.style.pointerEvents = 'auto'
+
+      span.addEventListener('mouseup', (e: MouseEvent) => {
+        e.stopPropagation()
+        const selection = window.getSelection()
+        const selectedText = selection?.toString().trim() || ''
+        if (selectedText.length >= 2 && onWordSelect) {
+          const rect = span.getBoundingClientRect()
+          onWordSelect(selectedText, rect.left + rect.width / 2, rect.bottom + 8)
+        }
+      })
+
+      textLayer.appendChild(span)
+    })
+  }, [scale, onWordSelect])
+
+  // Rebuild text layer when page becomes current
+  useEffect(() => {
+    if (isCurrentPage && rendered && textContentRef.current && viewportRef.current) {
+      buildTextLayer(textContentRef.current, viewportRef.current)
+    } else if (!isCurrentPage && textLayerRef.current) {
+      textLayerRef.current.innerHTML = ''
+    }
+  }, [isCurrentPage, rendered, buildTextLayer])
 
   const renderPage = useCallback(async () => {
     if (!canvasRef.current || !isVisible || rendered) return
@@ -76,83 +140,39 @@ export function PDFPageRenderer({
       setRendered(true)
       setLoading(false)
 
-      // Extract text
-      if (onTextExtracted || onPositionExtracted || textLayerRef.current) {
-        const content = await page.getTextContent()
-        const text = content.items.map((item: any) => item.str).join(' ')
-        onTextExtracted?.(pageNumber, text)
+      // Extract text content
+      const content = await page.getTextContent()
+      textContentRef.current = content
+      viewportRef.current = viewport
 
-        // Build text layer with CORRECT coordinate transform
-        if (textLayerRef.current) {
-          const textLayer = textLayerRef.current
-          textLayer.innerHTML = ''
-          const positions: { word: string; x: number; y: number; width: number; height: number; isItem?: boolean }[] = []
+      const text = content.items.map((item: any) => item.str).join(' ')
+      onTextExtracted?.(pageNumber, text)
 
-          content.items.forEach((item: any) => {
-            if (!item.str || !item.transform) return
-
-            // Apply viewport transform to get screen coordinates
-            const tx = applyTransform(viewport.transform, item.transform)
-            // tx[4] = screen X, tx[5] = screen Y (from top), tx[0] = horizontal scale, tx[3] = vertical scale
-
-            const screenX = tx[4]
-            const screenY = tx[5]
-            const fontHeight = Math.abs(tx[3]) || Math.abs(tx[0])
-            const itemWidth = item.width * scale || item.str.length * fontHeight * 0.5
-
-            const left = (screenX / viewport.width) * 100
-            const top = (screenY / viewport.height) * 100
-            const widthPct = (itemWidth / viewport.width) * 100
-            const heightPct = (fontHeight / viewport.height) * 100
-
-            const span = window.document.createElement('span')
-            span.textContent = item.str
-            span.setAttribute('data-text', item.str)
-            span.style.position = 'absolute'
-            span.style.left = `${left}%`
-            span.style.top = `${top}%`
-            span.style.width = `${widthPct}%`
-            span.style.height = `${heightPct}%`
-            span.style.fontSize = `${fontHeight * 0.9}px`
-            span.style.fontFamily = 'sans-serif'
-            span.style.lineHeight = '1.1'
-            span.style.whiteSpace = 'pre'
-            span.style.color = 'transparent'
-            span.style.cursor = 'text'
-            span.style.userSelect = 'text'
-            span.style.webkitUserSelect = 'text'
-            span.style.pointerEvents = 'auto'
-
-            // Collect word positions for RSVP — map words to text item positions
-            if (onPositionExtracted) {
-              // Each text item becomes one position entry using its full text
-              // Words are matched sequentially across items
-              positions.push({
-                word: item.str,
-                x: screenX / viewport.width,
-                y: screenY / viewport.height,
-                width: itemWidth / viewport.width,
-                height: fontHeight / viewport.height,
-                isItem: true, // marker: this is a full text item, not a single word
-              })
-            }
-
-            // Word selection
-            span.addEventListener('mouseup', (e: MouseEvent) => {
-              e.stopPropagation()
-              const selection = window.getSelection()
-              const selectedText = selection?.toString().trim() || ''
-              if (selectedText.length >= 2 && onWordSelect) {
-                const rect = span.getBoundingClientRect()
-                onWordSelect(selectedText, rect.left + rect.width / 2, rect.bottom + 8)
-              }
-            })
-
-            textLayer.appendChild(span)
+      // Build word positions (always, for RSVP)
+      if (onPositionExtracted) {
+        const positions: { word: string; x: number; y: number; width: number; height: number; isItem?: boolean }[] = []
+        content.items.forEach((item: any) => {
+          if (!item.str || !item.transform) return
+          const tx = applyTransform(viewport.transform, item.transform)
+          const screenX = tx[4]
+          const screenY = tx[5]
+          const fontHeight = Math.abs(tx[3]) || Math.abs(tx[0])
+          const itemWidth = item.width * scale || item.str.length * fontHeight * 0.5
+          positions.push({
+            word: item.str,
+            x: screenX / viewport.width,
+            y: screenY / viewport.height,
+            width: itemWidth / viewport.width,
+            height: fontHeight / viewport.height,
+            isItem: true,
           })
+        })
+        onPositionExtracted(pageNumber, positions)
+      }
 
-          onPositionExtracted?.(pageNumber, positions)
-        }
+      // Build text layer DOM — ONLY for current page to prevent ghost bleed-through
+      if (textLayerRef.current && isCurrentPage && textContentRef.current && viewportRef.current) {
+        buildTextLayer(textContentRef.current, viewportRef.current)
       }
     } catch (err: any) {
       if (err?.name !== 'RenderingCancelledException') {
@@ -160,7 +180,7 @@ export function PDFPageRenderer({
       }
       setLoading(false)
     }
-  }, [pdf, pageNumber, scale, isVisible, rendered, onTextExtracted, onDimensionsReady, onWordSelect, onPositionExtracted])
+  }, [pdf, pageNumber, scale, isVisible, rendered, isCurrentPage, onTextExtracted, onDimensionsReady, onWordSelect, onPositionExtracted])
 
   useEffect(() => {
     if (isVisible && !rendered) {
@@ -200,7 +220,7 @@ export function PDFPageRenderer({
 
       {loading && isVisible && (
         <div
-          className={`absolute inset-0 flex flex-col items-center justify-center rounded-sm ${isDarkMode ? 'bg-[#1a1a2e]' : 'bg-white'}`}
+          className={`absolute inset-0 flex flex-col items-center justify-center rounded-sm pointer-events-none ${isDarkMode ? 'bg-[#1a1a2e]' : 'bg-white'}`}
           style={{ width: pageWidth || 612, height: pageHeight || 792 }}
         >
           <div className="flex flex-col items-center gap-3">
