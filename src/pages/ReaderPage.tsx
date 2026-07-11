@@ -31,6 +31,8 @@ import { CommandPalette } from '@/components/reader/CommandPalette'
 import { TextToSpeech } from '@/components/reader/TextToSpeech'
 import { PomodoroTimer } from '@/components/reader/PomodoroTimer'
 import { AchievementPopup } from '@/components/reader/AchievementPopup'
+import { ReadingGoalsWidget } from '@/components/reader/ReadingGoalsWidget'
+import { SmartScrollIndicator } from '@/components/reader/SmartScrollIndicator'
 import { useExportNotes } from '@/components/reader/ExportNotes'
 import { useAchievementStore } from '@/stores/achievementStore'
 import {
@@ -71,6 +73,7 @@ export function ReaderPage() {
 
   const [selectedWord, setSelectedWord] = useState<{ word: string; x: number; y: number } | null>(null)
   const [showInlineRSVP, setShowInlineRSVP] = useState(false)
+  const [rsvpAutoPlaying, setRsvpAutoPlaying] = useState(false)
   const [showVocabulary, setShowVocabulary] = useState(false)
   const [showHeatmap, setShowHeatmap] = useState(true)
   const [showInsights, setShowInsights] = useState(false)
@@ -279,6 +282,23 @@ export function ReaderPage() {
 
   const handleWordsExtracted = useCallback((pageNumber: number, words: WordPos[]) => {
     setPageWords((prev) => ({ ...prev, [pageNumber]: words }))
+  }, [])
+
+  // RSVP auto-advance: scroll to next page and continue reading
+  const handleRSVPEnd = useCallback(() => {
+    if (currentPage >= totalPages) {
+      setShowInlineRSVP(false)
+      setRsvpAutoPlaying(false)
+      return
+    }
+    // Scroll to next page
+    const nextPage = currentPage + 1
+    handlePageChange(nextPage)
+    setRsvpAutoPlaying(true)
+  }, [currentPage, totalPages, handlePageChange])
+
+  const handleRSVPStart = useCallback(() => {
+    setRsvpAutoPlaying(true)
   }, [])
 
   // Coordinate-based word detection
@@ -521,6 +541,15 @@ export function ReaderPage() {
           </div>
         )}
 
+        {/* Smart scroll indicator */}
+        {totalPages > 0 && (
+          <SmartScrollIndicator
+            scrollRef={scrollRef}
+            totalPages={totalPages}
+            currentPage={currentPage}
+          />
+        )}
+
         {thumbnailsOpen && totalPages > 0 && pdf && (
           <PDFThumbnailPanel pdf={pdf} totalPages={totalPages} currentPage={currentPage} onPageSelect={handlePageChange} />
         )}
@@ -650,22 +679,27 @@ export function ReaderPage() {
 
           {/* Status bar */}
           <div className="h-10 border-t border-[var(--color-surface-3)] bg-[var(--color-surface-1)] flex items-center justify-between px-4 shrink-0 theme-transition z-20">
-            <div className="flex items-center gap-2">
-              <button onClick={() => handlePageChange(currentPage - 1)} disabled={currentPage <= 1} className="p-1.5 rounded-md text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-2)] disabled:opacity-30 transition-colors">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6" /></svg>
-              </button>
-              <div className="flex items-center gap-1">
-                <input
-                  type="number"
-                  value={currentPage}
-                  onChange={(e) => { const v = parseInt(e.target.value); if (v >= 1 && v <= totalPages) handlePageChange(v) }}
-                  className="w-10 h-6 text-center text-xs font-medium bg-[var(--color-surface-2)] border border-[var(--color-surface-3)] rounded text-[var(--color-text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)] tabular-nums"
-                />
-                <span className="text-xs text-[var(--color-text-tertiary)] tabular-nums">/ {totalPages}</span>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
+                <button onClick={() => handlePageChange(currentPage - 1)} disabled={currentPage <= 1} className="p-1.5 rounded-md text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-2)] disabled:opacity-30 transition-colors">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6" /></svg>
+                </button>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    value={currentPage}
+                    onChange={(e) => { const v = parseInt(e.target.value); if (v >= 1 && v <= totalPages) handlePageChange(v) }}
+                    className="w-10 h-6 text-center text-xs font-medium bg-[var(--color-surface-2)] border border-[var(--color-surface-3)] rounded text-[var(--color-text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)] tabular-nums"
+                  />
+                  <span className="text-xs text-[var(--color-text-tertiary)] tabular-nums">/ {totalPages}</span>
+                </div>
+                <button onClick={() => handlePageChange(currentPage + 1)} disabled={currentPage >= totalPages} className="p-1.5 rounded-md text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-2)] disabled:opacity-30 transition-colors">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18l6-6-6-6" /></svg>
+                </button>
               </div>
-              <button onClick={() => handlePageChange(currentPage + 1)} disabled={currentPage >= totalPages} className="p-1.5 rounded-md text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-2)] disabled:opacity-30 transition-colors">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18l6-6-6-6" /></svg>
-              </button>
+
+              {/* Reading goals widget (compact) */}
+              <ReadingGoalsWidget compact />
             </div>
 
             <ReadingTimer />
@@ -718,8 +752,12 @@ export function ReaderPage() {
           <InlineRSVP
             text={currentPageText}
             wordPositions={currentPageWords}
-            onClose={() => setShowInlineRSVP(false)}
+            onClose={() => { setShowInlineRSVP(false); setRsvpAutoPlaying(false) }}
             pageContainerRef={currentPageContainerRef}
+            pageNumber={currentPage}
+            totalPages={totalPages}
+            onPageEnd={handleRSVPEnd}
+            onPageStart={handleRSVPStart}
           />
         )}
       </AnimatePresence>

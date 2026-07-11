@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useCallback } from 'react'
 import { motion } from 'framer-motion'
 import { useFocusStore } from '@/stores/focusStore'
 
@@ -6,7 +6,7 @@ interface FocusGuideProps {
   containerRef: React.RefObject<HTMLDivElement | null>
 }
 
-export function FocusGuide({ containerRef: _containerRef }: FocusGuideProps) {
+export function FocusGuide({ containerRef }: FocusGuideProps) {
   const {
     style,
     width,
@@ -22,21 +22,59 @@ export function FocusGuide({ containerRef: _containerRef }: FocusGuideProps) {
   } = useFocusStore()
 
   const intervalRef = useRef<ReturnType<typeof setInterval>>(undefined)
+  const scrollIntervalRef = useRef<ReturnType<typeof setInterval>>(undefined)
 
+  // Find the scroll container
+  const getScrollContainer = useCallback(() => {
+    if (!containerRef?.current) return null
+    return containerRef.current.querySelector('[class*="overflow-auto"]') as HTMLElement | null
+  }, [containerRef])
+
+  // Auto-scroll: move guide down, and when it reaches bottom, scroll the page
   useEffect(() => {
     if (autoScroll && !isPaused) {
       intervalRef.current = setInterval(() => {
-        const pos = useFocusStore.getState().guidePosition
-        if (pos >= 98) {
-          useFocusStore.getState().toggleAutoScroll()
+        const state = useFocusStore.getState()
+        const pos = state.guidePosition
+
+        if (pos >= 90) {
+          // Guide is near bottom — scroll the container down to bring new content
+          const scrollEl = getScrollContainer()
+          if (scrollEl) {
+            const { scrollTop, scrollHeight, clientHeight } = scrollEl
+            const isAtBottom = scrollTop + clientHeight >= scrollHeight - 20
+
+            if (isAtBottom) {
+              // Truly at the end — stop
+              useFocusStore.getState().toggleAutoScroll()
+              return
+            }
+
+            // Smooth scroll down by ~30% of viewport
+            scrollEl.scrollBy({
+              top: clientHeight * 0.3,
+              behavior: 'smooth',
+            })
+
+            // Reset guide to ~30% after scroll so reading continues naturally
+            setTimeout(() => {
+              useFocusStore.getState().setGuidePosition(30)
+            }, 150)
+          } else {
+            // No scroll container found — just stop
+            useFocusStore.getState().toggleAutoScroll()
+          }
         } else {
           moveGuideDown()
         }
       }, speed)
     }
-    return () => clearInterval(intervalRef.current)
-  }, [autoScroll, isPaused, speed, moveGuideDown])
+    return () => {
+      clearInterval(intervalRef.current)
+    }
+  }, [autoScroll, isPaused, speed, moveGuideDown, getScrollContainer])
 
+  // Keyboard
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'ArrowUp') {

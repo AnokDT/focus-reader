@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Play, Pause, SkipBack, SkipForward, X, Minus, Plus } from 'lucide-react'
+import { Play, Pause, SkipBack, SkipForward, X, Minus, Plus, ChevronRight } from 'lucide-react'
 import type { WordPos } from '@/components/pdf/PDFPageRenderer'
 
 interface InlineRSVPProps {
@@ -8,6 +8,11 @@ interface InlineRSVPProps {
   wordPositions: WordPos[]
   onClose: () => void
   pageContainerRef?: React.RefObject<HTMLDivElement | null>
+  pageNumber?: number
+  totalPages?: number
+  onPageEnd?: () => void
+  onPageStart?: () => void
+  isPlayingExternal?: boolean
 }
 
 function tokenize(text: string): string[] {
@@ -25,7 +30,6 @@ function buildPositionMap(tokens: string[], positions: WordPos[]): Map<number, W
   let posIdx = 0
 
   for (let t = 0; t < tokens.length; t++) {
-    // Try to find a matching position
     let found = false
     for (let search = posIdx; search < Math.min(posIdx + 5, positions.length); search++) {
       if (positions[search].word === tokens[t]) {
@@ -35,7 +39,6 @@ function buildPositionMap(tokens: string[], positions: WordPos[]): Map<number, W
         break
       }
     }
-    // Fallback: interpolate position from neighbors
     if (!found && positions.length > 0) {
       const prevPos = positions[Math.max(0, posIdx - 1)]
       const nextPos = positions[Math.min(posIdx, positions.length - 1)]
@@ -53,17 +56,37 @@ function buildPositionMap(tokens: string[], positions: WordPos[]): Map<number, W
   return map
 }
 
-export function InlineRSVP({ text, wordPositions, onClose, pageContainerRef }: InlineRSVPProps) {
+export function InlineRSVP({
+  text,
+  wordPositions,
+  onClose,
+  pageContainerRef,
+  pageNumber,
+  totalPages,
+  onPageEnd,
+  onPageStart,
+}: InlineRSVPProps) {
   const tokens = useMemo(() => tokenize(text), [text])
   const [currentIndex, setCurrentIndex] = useState(0)
   const [isPlaying, setIsPlaying] = useState(false)
   const [wpm, setWpm] = useState(300)
   const [showControls, setShowControls] = useState(true)
+  const [isTransitioning, setIsTransitioning] = useState(false)
   const intervalRef = useRef<ReturnType<typeof setInterval>>(undefined)
   const controlsTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   const [, forceUpdate] = useState(0)
+  const prevTextRef = useRef(text)
 
   const posMap = useMemo(() => buildPositionMap(tokens, wordPositions), [tokens, wordPositions])
+
+  // Reset when text changes (new page)
+  useEffect(() => {
+    if (prevTextRef.current !== text) {
+      prevTextRef.current = text
+      setCurrentIndex(0)
+      setIsTransitioning(false)
+    }
+  }, [text])
 
   const currentWord = tokens[currentIndex] || ''
   const progress = tokens.length > 0 ? (currentIndex / tokens.length) * 100 : 0
@@ -80,7 +103,6 @@ export function InlineRSVP({ text, wordPositions, onClose, pageContainerRef }: I
 
     if (!scrollRect) return null
 
-    // Calculate scroll offset of the page within the scroll container
     const pageOffsetTop = pageRect.top - scrollRect.top + scrollContainer!.scrollTop
 
     return {
@@ -100,13 +122,26 @@ export function InlineRSVP({ text, wordPositions, onClose, pageContainerRef }: I
     return () => scrollEl.removeEventListener('scroll', onScroll)
   }, [pageContainerRef])
 
+  // Auto-advance to next page
+  const advanceToNextPage = useCallback(() => {
+    if (!onPageEnd) {
+      setIsPlaying(false)
+      return
+    }
+    setIsTransitioning(true)
+    setIsPlaying(false)
+    onPageEnd()
+  }, [onPageEnd])
+
   // Auto-play
   useEffect(() => {
-    if (isPlaying && currentIndex < tokens.length - 1) {
+    if (isPlaying && !isTransitioning) {
       intervalRef.current = setInterval(() => {
         setCurrentIndex((prev) => {
           if (prev >= tokens.length - 1) {
-            setIsPlaying(false)
+            // Reached end of page — auto-advance
+            clearInterval(intervalRef.current)
+            setTimeout(() => advanceToNextPage(), 100)
             return prev
           }
           return prev + 1
@@ -114,11 +149,13 @@ export function InlineRSVP({ text, wordPositions, onClose, pageContainerRef }: I
       }, (60 / wpm) * 1000)
     }
     return () => clearInterval(intervalRef.current)
-  }, [isPlaying, wpm, tokens.length, currentIndex])
+  }, [isPlaying, wpm, tokens.length, isTransitioning, advanceToNextPage])
 
   useEffect(() => {
-    if (currentIndex >= tokens.length - 1 && isPlaying) setIsPlaying(false)
-  }, [currentIndex, tokens.length, isPlaying])
+    if (currentIndex >= tokens.length - 1 && isPlaying && !isTransitioning) {
+      // Don't stop here — the interval handler will advance
+    }
+  }, [currentIndex, tokens.length, isPlaying, isTransitioning])
 
   // Hide controls after inactivity
   useEffect(() => {
@@ -132,10 +169,14 @@ export function InlineRSVP({ text, wordPositions, onClose, pageContainerRef }: I
   }, [showControls, isPlaying, currentIndex])
 
   const handlePlay = useCallback(() => {
-    if (currentIndex >= tokens.length - 1) setCurrentIndex(0)
+    if (currentIndex >= tokens.length - 1) {
+      setCurrentIndex(0)
+      onPageStart?.()
+    }
     setIsPlaying(true)
+    setIsTransitioning(false)
     setShowControls(true)
-  }, [currentIndex, tokens.length])
+  }, [currentIndex, tokens.length, onPageStart])
 
   const handlePause = useCallback(() => {
     setIsPlaying(false)
@@ -154,6 +195,10 @@ export function InlineRSVP({ text, wordPositions, onClose, pageContainerRef }: I
     setShowControls(true)
   }, [tokens.length])
 
+  const handleSkipToEnd = useCallback(() => {
+    advanceToNextPage()
+  }, [advanceToNextPage])
+
   // Keyboard
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
@@ -161,10 +206,11 @@ export function InlineRSVP({ text, wordPositions, onClose, pageContainerRef }: I
       if (e.key === ' ') { e.preventDefault(); isPlaying ? handlePause() : handlePlay() }
       if (e.key === 'ArrowLeft') handlePrev()
       if (e.key === 'ArrowRight') handleNext()
+      if (e.key === 'n' || e.key === 'Enter') handleSkipToEnd()
     }
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
-  }, [isPlaying, onClose, handlePlay, handlePause, handlePrev, handleNext])
+  }, [isPlaying, onClose, handlePlay, handlePause, handlePrev, handleNext, handleSkipToEnd])
 
   // Show controls on mouse move
   useEffect(() => {
@@ -173,10 +219,12 @@ export function InlineRSVP({ text, wordPositions, onClose, pageContainerRef }: I
     return () => window.removeEventListener('mousemove', handleMove)
   }, [])
 
+  const hasNextPage = (pageNumber || 0) < (totalPages || 0)
+
   return (
     <>
       {/* Word highlight — positioned at actual screen coordinates */}
-      {highlight && (
+      {highlight && !isTransitioning && (
         <div
           className="fixed pointer-events-none"
           style={{
@@ -213,10 +261,17 @@ export function InlineRSVP({ text, wordPositions, onClose, pageContainerRef }: I
               {/* Current word */}
               <div className="px-6 pt-3 pb-1">
                 <div className="text-center" style={{ fontFamily: 'var(--font-reading)' }}>
-                  <span className="text-lg font-bold text-[var(--color-accent)]">{currentWord}</span>
+                  <span className="text-lg font-bold text-[var(--color-accent)]">
+                    {isTransitioning ? 'Loading next page...' : currentWord}
+                  </span>
                   <span className="text-xs text-[var(--color-text-tertiary)] ml-2">
                     {currentIndex + 1}/{tokens.length}
                   </span>
+                  {pageNumber && (
+                    <span className="text-xs text-[var(--color-text-tertiary)] ml-2">
+                      · Page {pageNumber}
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -260,7 +315,16 @@ export function InlineRSVP({ text, wordPositions, onClose, pageContainerRef }: I
                   </button>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5">
+                  {hasNextPage && (
+                    <button
+                      onClick={handleSkipToEnd}
+                      className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium text-[var(--color-accent)] hover:bg-[var(--color-accent-muted)] transition-colors"
+                      title="Skip to next page (N)"
+                    >
+                      Next page <ChevronRight size={12} />
+                    </button>
+                  )}
                   <button onClick={onClose} className="p-1.5 rounded-lg text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text-primary)] transition-colors">
                     <X size={14} />
                   </button>
