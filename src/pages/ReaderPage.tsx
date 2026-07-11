@@ -75,6 +75,7 @@ export function ReaderPage() {
   const [showInlineRSVP, setShowInlineRSVP] = useState(false)
   const [rsvpAutoPlaying, setRsvpAutoPlaying] = useState(false)
   const [rsvpDisplayPage, setRsvpDisplayPage] = useState(0)
+  const [rsvpStartIndex, setRsvpStartIndex] = useState(0)
   const [showVocabulary, setShowVocabulary] = useState(false)
   const [showHeatmap, setShowHeatmap] = useState(true)
   const [showInsights, setShowInsights] = useState(false)
@@ -311,8 +312,10 @@ export function ReaderPage() {
 
     let closestWord: WordPos | null = null
     let closestDist = Infinity
+    let closestIndex = -1
 
-    for (const w of words) {
+    for (let i = 0; i < words.length; i++) {
+      const w = words[i]
       const inX = x >= w.x - 5 && x <= w.x + w.width + 5
       const inY = y >= w.y - 5 && y <= w.y + w.height + 5
 
@@ -321,6 +324,7 @@ export function ReaderPage() {
         if (dist < closestDist) {
           closestDist = dist
           closestWord = w
+          closestIndex = i
         }
       }
     }
@@ -328,6 +332,8 @@ export function ReaderPage() {
     if (closestWord && closestWord.word.length >= 2) {
       const cleanWord = closestWord.word.replace(/[^\p{L}\p{N}]/gu, '').trim()
       if (cleanWord.length >= 2) {
+        // Store the clicked word index for RSVP to start from
+        setRsvpStartIndex(closestIndex)
         const pageEl = pageRefs.current.get(pageNumber)
         const pageRect = pageEl?.getBoundingClientRect()
         if (pageRect) {
@@ -458,7 +464,7 @@ export function ReaderPage() {
           if (searchOpen) setSearchOpen(false)
           break
         case 'w': handleFitWidth(); break
-        case 'r': if (!e.ctrlKey && !e.metaKey && currentPageText.length > 0) setShowInlineRSVP(true); break
+        case 'r': if (!e.ctrlKey && !e.metaKey && currentPageText.length > 0) { setShowInlineRSVP(true); setRsvpAutoPlaying(false) } break
         case 'v': if (!e.ctrlKey && !e.metaKey) setShowVocabulary((v) => !v); break
         case 'i': if (!e.ctrlKey && !e.metaKey) setShowInsights((v) => !v); break
         case 'h': if (!e.ctrlKey && !e.metaKey) setShowHeatmap((v) => !v); break
@@ -762,6 +768,7 @@ export function ReaderPage() {
             onPageEnd={handleRSVPEnd}
             onPageStart={handleRSVPStart}
             autoPlay={rsvpAutoPlaying}
+            startIndex={rsvpStartIndex}
           />
         )}
       </AnimatePresence>

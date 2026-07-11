@@ -13,6 +13,7 @@ interface InlineRSVPProps {
   onPageEnd?: () => void
   onPageStart?: () => void
   autoPlay?: boolean
+  startIndex?: number
 }
 
 function tokenize(text: string): string[] {
@@ -31,7 +32,7 @@ function buildPositionMap(tokens: string[], positions: WordPos[]): Map<number, W
 
   for (let t = 0; t < tokens.length; t++) {
     let found = false
-    for (let search = posIdx; search < Math.min(posIdx + 5, positions.length); search++) {
+    for (let search = posIdx; search < Math.min(posIdx + 8, positions.length); search++) {
       if (positions[search].word === tokens[t]) {
         map.set(t, positions[search])
         posIdx = search + 1
@@ -66,9 +67,10 @@ export function InlineRSVP({
   onPageEnd,
   onPageStart,
   autoPlay = false,
+  startIndex = 0,
 }: InlineRSVPProps) {
   const tokens = useMemo(() => tokenize(text), [text])
-  const [currentIndex, setCurrentIndex] = useState(0)
+  const [currentIndex, setCurrentIndex] = useState(() => Math.min(startIndex, tokens.length - 1))
   const [isPlaying, setIsPlaying] = useState(false)
   const [wpm, setWpm] = useState(300)
   const [showControls, setShowControls] = useState(true)
@@ -77,12 +79,9 @@ export function InlineRSVP({
   const controlsTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   const prevTextRef = useRef(text)
   const autoPlayRef = useRef(autoPlay)
-  const scrollCooldownRef = useRef(false)
-  const lastScrollTopRef = useRef(0)
-  const displayPageRef = useRef(pageNumber || 1)
+  const lastScrollTopRef = useRef<number | null>(null)
 
   autoPlayRef.current = autoPlay
-  if (pageNumber !== undefined) displayPageRef.current = pageNumber
 
   const posMap = useMemo(() => buildPositionMap(tokens, wordPositions), [tokens, wordPositions])
 
@@ -92,7 +91,6 @@ export function InlineRSVP({
       prevTextRef.current = text
       setCurrentIndex(0)
       setIsTransitioning(false)
-      scrollCooldownRef.current = false
       if (autoPlayRef.current) {
         setTimeout(() => setIsPlaying(true), 300)
       }
@@ -103,49 +101,43 @@ export function InlineRSVP({
   const currentPos = posMap.get(currentIndex)
   const progress = tokens.length > 0 ? (currentIndex / tokens.length) * 100 : 0
 
-  // Get word's position relative to the scroll container
-  const getWordYInScrollContainer = useCallback((): number | null => {
-    if (!currentPos || !pageContainerRef?.current) return null
+  // Calculate highlight screen position
+  const highlight = useMemo(() => {
+    if (currentIndex >= tokens.length || !pageContainerRef?.current || !currentPos) return null
     const pageRect = pageContainerRef.current.getBoundingClientRect()
-    const scrollContainer = pageContainerRef.current.closest('[class*="overflow-auto"]') as HTMLElement | null
-    if (!scrollContainer) return null
-    const scrollRect = scrollContainer.getBoundingClientRect()
-    // Word's position relative to scroll container's visible area + current scroll
-    return pageRect.top - scrollRect.top + currentPos.y - scrollContainer.scrollTop
-  }, [currentPos, pageContainerRef])
+    return {
+      x: pageRect.left + currentPos.x,
+      y: pageRect.top + currentPos.y,
+      w: Math.max(currentPos.width, 30),
+      h: Math.max(currentPos.height, 14),
+    }
+  }, [currentIndex, currentPos, pageContainerRef])
 
-  // AUTO-SCROLL: only scroll DOWN when highlight goes below 55% of viewport
+  // SCROLL: keep the current word visible by scrolling down when needed
   useEffect(() => {
-    if (isTransitioning || scrollCooldownRef.current || !isPlaying) return
-    const wordY = getWordYInScrollContainer()
-    if (wordY === null) return
+    if (!highlight || isTransitioning || !isPlaying) return
+    if (!pageContainerRef?.current) return
 
-    const scrollContainer = pageContainerRef?.current?.closest('[class*="overflow-auto"]') as HTMLElement | null
+    const scrollContainer = pageContainerRef.current.closest('[class*="overflow-auto"]') as HTMLElement | null
     if (!scrollContainer) return
 
-    const viewportHeight = scrollContainer.clientHeight
+    const scrollRect = scrollContainer.getBoundingClientRect()
+    const wordScreenY = highlight.y
 
-    // Only scroll DOWN when word is below the comfortable reading zone
-    if (wordY > viewportHeight * 0.55) {
-      // Scroll down to bring the word to ~35% from top
-      const targetScrollTop = scrollContainer.scrollTop + wordY - viewportHeight * 0.35
+    // Word position relative to scroll container's visible area
+    const wordRelativeY = wordScreenY - scrollRect.top
 
-      // Don't scroll if we're already near the target
-      if (Math.abs(targetScrollTop - scrollContainer.scrollTop) < 10) return
+    const viewportHeight = scrollRect.height
 
-      scrollCooldownRef.current = true
-      scrollContainer.scrollTo({
-        top: targetScrollTop,
-        behavior: 'smooth',
-      })
-
-      // Cooldown to let smooth scroll settle
-      setTimeout(() => {
-        scrollCooldownRef.current = false
-      }, 350)
+    // If word is below 60% of viewport, scroll down to bring it to 35%
+    if (wordRelativeY > viewportHeight * 0.6) {
+      const scrollTarget = scrollContainer.scrollTop + (wordRelativeY - viewportHeight * 0.35)
+      // Only scroll down, never up
+      if (scrollTarget > scrollContainer.scrollTop) {
+        scrollContainer.scrollTo({ top: scrollTarget, behavior: 'smooth' })
+      }
     }
-    // NEVER scroll up — let the words flow naturally from top to bottom
-  }, [currentIndex, isPlaying, isTransitioning, getWordYInScrollContainer, pageContainerRef])
+  }, [highlight, isTransitioning, isPlaying, pageContainerRef])
 
   // Auto-advance to next page
   const advanceToNextPage = useCallback(() => {
@@ -164,7 +156,7 @@ export function InlineRSVP({
         setCurrentIndex((prev) => {
           if (prev >= tokens.length - 1) {
             clearInterval(intervalRef.current)
-            setTimeout(() => advanceToNextPage(), 100)
+            setTimeout(() => advanceToNextPage(), 150)
             return prev
           }
           return prev + 1
@@ -212,10 +204,6 @@ export function InlineRSVP({
     setShowControls(true)
   }, [tokens.length])
 
-  const handleSkipToEnd = useCallback(() => {
-    advanceToNextPage()
-  }, [advanceToNextPage])
-
   // Keyboard
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
@@ -223,11 +211,11 @@ export function InlineRSVP({
       if (e.key === ' ') { e.preventDefault(); isPlaying ? handlePause() : handlePlay() }
       if (e.key === 'ArrowLeft') handlePrev()
       if (e.key === 'ArrowRight') handleNext()
-      if (e.key === 'n' || e.key === 'Enter') handleSkipToEnd()
+      if (e.key === 'n' || e.key === 'Enter') advanceToNextPage()
     }
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
-  }, [isPlaying, onClose, handlePlay, handlePause, handlePrev, handleNext, handleSkipToEnd])
+  }, [isPlaying, onClose, handlePlay, handlePause, handlePrev, handleNext, advanceToNextPage])
 
   // Show controls on mouse move
   useEffect(() => {
@@ -236,40 +224,28 @@ export function InlineRSVP({
     return () => window.removeEventListener('mousemove', handleMove)
   }, [])
 
-  // Calculate highlight screen position for rendering
-  const highlightScreen = useMemo(() => {
-    if (currentIndex >= tokens.length || !pageContainerRef?.current || !currentPos) return null
-    const pageRect = pageContainerRef.current.getBoundingClientRect()
-    return {
-      x: pageRect.left + currentPos.x,
-      y: pageRect.top + currentPos.y,
-      w: Math.max(currentPos.width, 30),
-      h: Math.max(currentPos.height, 14),
-    }
-  }, [currentIndex, currentPos, pageContainerRef])
-
   const hasNextPage = (pageNumber || 0) < (totalPages || 0)
 
   return (
     <>
-      {/* Highlight on the word */}
-      {highlightScreen && !isTransitioning && (
+      {/* Highlight on the current word */}
+      {highlight && !isTransitioning && (
         <div
           className="fixed pointer-events-none"
           style={{
-            left: highlightScreen.x,
-            top: highlightScreen.y,
-            width: highlightScreen.w,
-            height: highlightScreen.h,
+            left: highlight.x,
+            top: highlight.y,
+            width: highlight.w,
+            height: highlight.h,
             zIndex: 55,
           }}
         >
           <div
             className="absolute -inset-[6px] rounded-lg"
             style={{
-              background: 'rgba(var(--color-accent-rgb, 59, 130, 246), 0.18)',
+              background: 'rgba(var(--color-accent-rgb, 59, 130, 246), 0.2)',
               border: '2px solid var(--color-accent)',
-              boxShadow: '0 0 20px rgba(var(--color-accent-rgb, 59, 130, 246), 0.3), 0 0 40px rgba(var(--color-accent-rgb, 59, 130, 246), 0.1)',
+              boxShadow: '0 0 20px rgba(var(--color-accent-rgb, 59, 130, 246), 0.35)',
             }}
           />
         </div>
@@ -300,7 +276,7 @@ export function InlineRSVP({
                     {currentIndex + 1}/{tokens.length}
                   </span>
                   <span className="text-[10px] text-[var(--color-text-tertiary)]">
-                    Page {displayPageRef.current}
+                    Page {pageNumber || '?'}
                   </span>
                 </div>
               </div>
@@ -336,7 +312,7 @@ export function InlineRSVP({
                 <div className="flex items-center gap-1.5">
                   {hasNextPage && (
                     <button
-                      onClick={handleSkipToEnd}
+                      onClick={advanceToNextPage}
                       className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium text-[var(--color-accent)] hover:bg-[var(--color-accent-muted)] transition-colors"
                     >
                       Next <ChevronRight size={12} />
