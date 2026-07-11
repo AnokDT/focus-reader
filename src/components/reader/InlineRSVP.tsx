@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Play, Pause, SkipBack, SkipForward, X, Minus, Plus, ChevronRight } from 'lucide-react'
+import { Play, Pause, SkipBack, SkipForward, X, Minus, Plus, ChevronRight, ChevronLeft } from 'lucide-react'
 import type { WordPos } from '@/components/pdf/PDFPageRenderer'
 
 interface InlineRSVPProps {
@@ -70,7 +70,7 @@ export function InlineRSVP({
   startIndex = 0,
 }: InlineRSVPProps) {
   const tokens = useMemo(() => tokenize(text), [text])
-  const [currentIndex, setCurrentIndex] = useState(() => Math.min(startIndex, tokens.length - 1))
+  const [currentIndex, setCurrentIndex] = useState(0)
   const [isPlaying, setIsPlaying] = useState(false)
   const [wpm, setWpm] = useState(300)
   const [showControls, setShowControls] = useState(true)
@@ -78,14 +78,14 @@ export function InlineRSVP({
   const intervalRef = useRef<ReturnType<typeof setInterval>>(undefined)
   const controlsTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   const prevTextRef = useRef(text)
+  const prevStartIndexRef = useRef(startIndex)
   const autoPlayRef = useRef(autoPlay)
-  const lastScrollTopRef = useRef<number | null>(null)
 
   autoPlayRef.current = autoPlay
 
   const posMap = useMemo(() => buildPositionMap(tokens, wordPositions), [tokens, wordPositions])
 
-  // Reset when text changes (new page)
+  // When text changes (new page), reset to 0
   useEffect(() => {
     if (prevTextRef.current !== text) {
       prevTextRef.current = text
@@ -96,6 +96,16 @@ export function InlineRSVP({
       }
     }
   }, [text])
+
+  // When startIndex changes (user clicked a word), jump to that word
+  useEffect(() => {
+    if (startIndex !== prevStartIndexRef.current && startIndex >= 0 && startIndex < tokens.length) {
+      prevStartIndexRef.current = startIndex
+      setCurrentIndex(startIndex)
+      // Auto-play from the clicked word
+      setTimeout(() => setIsPlaying(true), 100)
+    }
+  }, [startIndex, tokens.length])
 
   const currentWord = tokens[currentIndex] || ''
   const currentPos = posMap.get(currentIndex)
@@ -122,17 +132,11 @@ export function InlineRSVP({
     if (!scrollContainer) return
 
     const scrollRect = scrollContainer.getBoundingClientRect()
-    const wordScreenY = highlight.y
-
-    // Word position relative to scroll container's visible area
-    const wordRelativeY = wordScreenY - scrollRect.top
-
+    const wordRelativeY = highlight.y - scrollRect.top
     const viewportHeight = scrollRect.height
 
-    // If word is below 60% of viewport, scroll down to bring it to 35%
     if (wordRelativeY > viewportHeight * 0.6) {
       const scrollTarget = scrollContainer.scrollTop + (wordRelativeY - viewportHeight * 0.35)
-      // Only scroll down, never up
       if (scrollTarget > scrollContainer.scrollTop) {
         scrollContainer.scrollTo({ top: scrollTarget, behavior: 'smooth' })
       }
@@ -192,30 +196,69 @@ export function InlineRSVP({
     setShowControls(true)
   }, [])
 
-  const handlePrev = useCallback(() => {
+  // Word-by-word navigation
+  const handlePrevWord = useCallback(() => {
     setIsPlaying(false)
-    setCurrentIndex((p) => Math.max(0, p - 1))
     setShowControls(true)
-  }, [])
+    setCurrentIndex((p) => {
+      const next = Math.max(0, p - 1)
+      // Scroll to show the previous word
+      const pos = posMap.get(next)
+      if (pos && pageContainerRef?.current) {
+        const scrollContainer = pageContainerRef.current.closest('[class*="overflow-auto"]') as HTMLElement | null
+        if (scrollContainer) {
+          const pageRect = pageContainerRef.current.getBoundingClientRect()
+          const scrollRect = scrollContainer.getBoundingClientRect()
+          const wordY = pageRect.top - scrollRect.top + pos.y - scrollContainer.scrollTop
+          if (wordY < scrollRect.height * 0.3 || wordY > scrollRect.height * 0.6) {
+            scrollContainer.scrollTo({
+              top: scrollContainer.scrollTop + wordY - scrollRect.height * 0.4,
+              behavior: 'smooth',
+            })
+          }
+        }
+      }
+      return next
+    })
+  }, [posMap, pageContainerRef])
 
-  const handleNext = useCallback(() => {
+  const handleNextWord = useCallback(() => {
     setIsPlaying(false)
-    setCurrentIndex((p) => Math.min(tokens.length - 1, p + 1))
     setShowControls(true)
-  }, [tokens.length])
+    setCurrentIndex((p) => {
+      const next = Math.min(tokens.length - 1, p + 1)
+      // Scroll to show the next word
+      const pos = posMap.get(next)
+      if (pos && pageContainerRef?.current) {
+        const scrollContainer = pageContainerRef.current.closest('[class*="overflow-auto"]') as HTMLElement | null
+        if (scrollContainer) {
+          const pageRect = pageContainerRef.current.getBoundingClientRect()
+          const scrollRect = scrollContainer.getBoundingClientRect()
+          const wordY = pageRect.top - scrollRect.top + pos.y - scrollContainer.scrollTop
+          if (wordY > scrollRect.height * 0.55) {
+            scrollContainer.scrollTo({
+              top: scrollContainer.scrollTop + wordY - scrollRect.height * 0.35,
+              behavior: 'smooth',
+            })
+          }
+        }
+      }
+      return next
+    })
+  }, [tokens.length, posMap, pageContainerRef])
 
   // Keyboard
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
       if (e.key === ' ') { e.preventDefault(); isPlaying ? handlePause() : handlePlay() }
-      if (e.key === 'ArrowLeft') handlePrev()
-      if (e.key === 'ArrowRight') handleNext()
+      if (e.key === 'ArrowLeft') handlePrevWord()
+      if (e.key === 'ArrowRight') handleNextWord()
       if (e.key === 'n' || e.key === 'Enter') advanceToNextPage()
     }
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)
-  }, [isPlaying, onClose, handlePlay, handlePause, handlePrev, handleNext, advanceToNextPage])
+  }, [isPlaying, onClose, handlePlay, handlePause, handlePrevWord, handleNextWord, advanceToNextPage])
 
   // Show controls on mouse move
   useEffect(() => {
@@ -263,7 +306,15 @@ export function InlineRSVP({
             className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[70]"
           >
             <div className="bg-[var(--color-surface-0)]/95 backdrop-blur-2xl border border-[var(--color-surface-3)] rounded-2xl shadow-[0_8px_40px_rgba(0,0,0,0.15)] overflow-hidden">
-              <div className="px-5 pt-3">
+              {/* Current word display */}
+              <div className="px-6 pt-3 pb-1">
+                <div className="text-center" style={{ fontFamily: 'var(--font-reading)' }}>
+                  <span className="text-lg font-bold text-[var(--color-accent)]">{currentWord}</span>
+                </div>
+              </div>
+
+              {/* Progress */}
+              <div className="px-5">
                 <div className="relative h-1 bg-[var(--color-surface-3)] rounded-full overflow-hidden">
                   <motion.div
                     className="absolute inset-y-0 left-0 bg-gradient-to-r from-[var(--color-accent)] to-purple-500 rounded-full"
@@ -273,7 +324,7 @@ export function InlineRSVP({
                 </div>
                 <div className="flex items-center justify-between mt-1.5">
                   <span className="text-[10px] text-[var(--color-text-tertiary)] tabular-nums">
-                    {currentIndex + 1}/{tokens.length}
+                    Word {currentIndex + 1} of {tokens.length}
                   </span>
                   <span className="text-[10px] text-[var(--color-text-tertiary)]">
                     Page {pageNumber || '?'}
@@ -281,8 +332,10 @@ export function InlineRSVP({
                 </div>
               </div>
 
-              <div className="px-5 py-3 flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
+              {/* Controls */}
+              <div className="px-4 py-3 flex items-center justify-between gap-2">
+                {/* WPM control */}
+                <div className="flex items-center gap-1">
                   <button onClick={() => setWpm((w) => Math.max(100, w - 25))} className="p-1.5 rounded-lg text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-2)] transition-colors">
                     <Minus size={14} />
                   </button>
@@ -294,28 +347,55 @@ export function InlineRSVP({
                   </button>
                 </div>
 
-                <div className="flex items-center gap-1.5">
-                  <button onClick={handlePrev} className="p-2 rounded-lg text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-2)] transition-colors">
-                    <SkipBack size={16} />
+                {/* Playback controls with word nav */}
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={handlePrevWord}
+                    className="p-2 rounded-lg text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-2)] transition-colors"
+                    title="Previous word (←)"
+                  >
+                    <ChevronLeft size={16} />
                   </button>
                   <button
+                    onClick={handlePrevWord}
+                    className="p-1.5 rounded-lg text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-2)] transition-colors"
+                    title="Back 1 word"
+                  >
+                    <SkipBack size={14} />
+                  </button>
+
+                  <button
                     onClick={() => isPlaying ? handlePause() : handlePlay()}
-                    className="p-3 rounded-xl bg-[var(--color-accent)] text-white hover:bg-[var(--color-accent-hover)] transition-colors shadow-lg shadow-[var(--color-accent)]/25"
+                    className="p-3 rounded-xl bg-[var(--color-accent)] text-white hover:bg-[var(--color-accent-hover)] transition-colors shadow-lg shadow-[var(--color-accent)]/25 mx-1"
+                    title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
                   >
                     {isPlaying ? <Pause size={18} /> : <Play size={18} className="ml-0.5" />}
                   </button>
-                  <button onClick={handleNext} className="p-2 rounded-lg text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-2)] transition-colors">
-                    <SkipForward size={16} />
+
+                  <button
+                    onClick={handleNextWord}
+                    className="p-1.5 rounded-lg text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-2)] transition-colors"
+                    title="Forward 1 word"
+                  >
+                    <SkipForward size={14} />
+                  </button>
+                  <button
+                    onClick={handleNextWord}
+                    className="p-2 rounded-lg text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-2)] transition-colors"
+                    title="Next word (→)"
+                  >
+                    <ChevronRight size={16} />
                   </button>
                 </div>
 
-                <div className="flex items-center gap-1.5">
+                {/* Page nav & close */}
+                <div className="flex items-center gap-1">
                   {hasNextPage && (
                     <button
                       onClick={advanceToNextPage}
                       className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium text-[var(--color-accent)] hover:bg-[var(--color-accent-muted)] transition-colors"
                     >
-                      Next <ChevronRight size={12} />
+                      Next pg <ChevronRight size={12} />
                     </button>
                   )}
                   <button onClick={onClose} className="p-1.5 rounded-lg text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-2)] transition-colors">

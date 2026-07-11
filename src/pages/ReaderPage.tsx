@@ -332,8 +332,14 @@ export function ReaderPage() {
     if (closestWord && closestWord.word.length >= 2) {
       const cleanWord = closestWord.word.replace(/[^\p{L}\p{N}]/gu, '').trim()
       if (cleanWord.length >= 2) {
-        // Store the clicked word index for RSVP to start from
         setRsvpStartIndex(closestIndex)
+        // If RSVP is not open, open it and start from this word
+        if (!showInlineRSVP) {
+          setShowInlineRSVP(true)
+          // Don't show WordPopup — start reading instead
+          return
+        }
+        // If RSVP is already open, show dictionary popup
         const pageEl = pageRefs.current.get(pageNumber)
         const pageRect = pageEl?.getBoundingClientRect()
         if (pageRect) {
