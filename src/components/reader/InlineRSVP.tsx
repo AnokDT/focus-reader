@@ -89,7 +89,6 @@ export function InlineRSVP({
       prevTextRef.current = text
       setCurrentIndex(0)
       setIsTransitioning(false)
-      // Auto-play on new page if autoPlay is set
       if (autoPlayRef.current) {
         setTimeout(() => setIsPlaying(true), 200)
       }
@@ -97,37 +96,62 @@ export function InlineRSVP({
   }, [text])
 
   const currentWord = tokens[currentIndex] || ''
+  const currentPos = posMap.get(currentIndex)
   const progress = tokens.length > 0 ? (currentIndex / tokens.length) * 100 : 0
 
-  // Scroll page to keep current word near the center highlight
-  useEffect(() => {
-    if (currentIndex >= tokens.length || isTransitioning) return
-    const pos = posMap.get(currentIndex)
-    if (!pos || !pageContainerRef?.current) return
-
-    const scrollContainer = pageContainerRef.current.closest('[class*="overflow-auto"]') as HTMLElement | null
-    if (!scrollContainer) return
+  // Calculate screen position for the current word highlight
+  const highlight = useMemo(() => {
+    if (currentIndex >= tokens.length || !pageContainerRef?.current || !currentPos) return null
 
     const pageRect = pageContainerRef.current.getBoundingClientRect()
-    const scrollRect = scrollContainer.getBoundingClientRect()
+    const scrollContainer = pageContainerRef.current.closest('[class*="overflow-auto"]') as HTMLElement | null
+    const scrollRect = scrollContainer?.getBoundingClientRect()
+    if (!scrollRect) return null
 
-    // Word's position relative to the scroll container viewport
-    const wordRelativeY = pageRect.top - scrollRect.top + pos.y - scrollContainer.scrollTop
-
-    // Center of the scroll container
-    const containerCenter = scrollRect.height / 2
-
-    // How far the word is from center
-    const offset = wordRelativeY - containerCenter
-
-    // Only scroll if the word is significantly off-center (>40px)
-    if (Math.abs(offset) > 40) {
-      scrollContainer.scrollBy({
-        top: offset * 0.6,
-        behavior: 'smooth',
-      })
+    return {
+      screenX: pageRect.left + currentPos.x,
+      screenY: pageRect.top + currentPos.y,
+      width: currentPos.width,
+      height: currentPos.height,
     }
-  }, [currentIndex, posMap, pageContainerRef, isTransitioning])
+  }, [currentIndex, currentPos, pageContainerRef, forceUpdate])
+
+  // Auto-scroll: keep highlight in the upper 30-50% of the viewport
+  useEffect(() => {
+    if (!highlight || isTransitioning) return
+    const scrollContainer = pageContainerRef?.current?.closest('[class*="overflow-auto"]') as HTMLElement | null
+    if (!scrollContainer) return
+
+    const scrollRect = scrollContainer.getBoundingClientRect()
+    const viewportHeight = scrollRect.height
+
+    // Where the highlight is on screen (relative to viewport)
+    const highlightOnScreen = highlight.screenY - scrollRect.top
+
+    // Target zone: keep highlight between 30% and 50% of viewport
+    const targetMin = viewportHeight * 0.3
+    const targetMax = viewportHeight * 0.5
+
+    // If highlight is below target zone, scroll down
+    if (highlightOnScreen > targetMax) {
+      const scrollAmount = highlightOnScreen - (viewportHeight * 0.4)
+      scrollContainer.scrollBy({ top: scrollAmount, behavior: 'smooth' })
+    }
+    // If highlight is above target zone, scroll up
+    else if (highlightOnScreen < targetMin) {
+      const scrollAmount = highlightOnScreen - (viewportHeight * 0.4)
+      scrollContainer.scrollBy({ top: scrollAmount, behavior: 'smooth' })
+    }
+  }, [highlight, isTransitioning, pageContainerRef])
+
+  // Recalculate on external scroll
+  useEffect(() => {
+    const scrollEl = pageContainerRef?.current?.closest('[class*="overflow-auto"]') as HTMLElement | null
+    if (!scrollEl) return
+    const onScroll = () => forceUpdate((n) => n + 1)
+    scrollEl.addEventListener('scroll', onScroll, { passive: true })
+    return () => scrollEl.removeEventListener('scroll', onScroll)
+  }, [pageContainerRef])
 
   // Auto-advance to next page
   const advanceToNextPage = useCallback(() => {
@@ -139,7 +163,7 @@ export function InlineRSVP({
     onPageEnd()
   }, [onPageEnd])
 
-  // Auto-play
+  // Auto-play interval
   useEffect(() => {
     if (isPlaying && !isTransitioning) {
       intervalRef.current = setInterval(() => {
@@ -222,37 +246,27 @@ export function InlineRSVP({
 
   return (
     <>
-      {/* CENTERED highlight box — fixed at screen center, page scrolls under it */}
-      {!isTransitioning && (
+      {/* Highlight — follows the word, page scrolls to keep it in upper viewport */}
+      {highlight && !isTransitioning && (
         <div
-          className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none"
-          style={{ zIndex: 55 }}
+          className="fixed pointer-events-none"
+          style={{
+            left: highlight.screenX,
+            top: highlight.screenY,
+            width: Math.max(highlight.width, 30),
+            height: Math.max(highlight.height, 14),
+            zIndex: 55,
+          }}
         >
-          {/* Glow background */}
+          {/* Glow behind the word */}
           <div
-            className="absolute -inset-4 rounded-2xl"
+            className="absolute -inset-[6px] rounded-lg"
             style={{
-              background: 'rgba(0, 0, 0, 0.65)',
-              backdropFilter: 'blur(2px)',
+              background: 'rgba(var(--color-accent-rgb, 59, 130, 246), 0.18)',
+              border: '2px solid var(--color-accent)',
+              boxShadow: '0 0 20px rgba(var(--color-accent-rgb, 59, 130, 246), 0.3), 0 0 40px rgba(var(--color-accent-rgb, 59, 130, 246), 0.1)',
             }}
           />
-          {/* Highlight box */}
-          <div
-            className="relative px-6 py-3 rounded-xl min-w-[120px]"
-            style={{
-              background: 'rgba(var(--color-accent-rgb, 59, 130, 246), 0.15)',
-              border: '2px solid var(--color-accent)',
-              boxShadow: '0 0 40px rgba(var(--color-accent-rgb, 59, 130, 246), 0.4), 0 0 80px rgba(var(--color-accent-rgb, 59, 130, 246), 0.15)',
-            }}
-          >
-            <div className="text-center" style={{ fontFamily: 'var(--font-reading)' }}>
-              <span className="text-2xl font-bold text-[var(--color-accent)]">
-                {currentWord}
-              </span>
-            </div>
-            {/* Center line guide */}
-            <div className="absolute left-4 right-4 top-1/2 -translate-y-1/2 h-px bg-[var(--color-accent)] opacity-20" />
-          </div>
         </div>
       )}
 
