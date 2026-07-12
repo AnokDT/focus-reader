@@ -15,6 +15,7 @@ import {
 import { useUIStore } from '@/stores/uiStore'
 import { Button } from '@/components/ui/Button'
 import { Tooltip } from '@/components/ui/Tooltip'
+import { AmbientSoundscape } from '@/components/reader/AmbientSoundscape'
 
 interface ReaderHeaderProps {
   title: string
@@ -140,6 +141,9 @@ export function ReaderHeader({
         <Tooltip content="Command palette (⌘K)">
           <Button variant="ghost" size="sm" onClick={onToggleCommandPalette} icon={<Command size={15} />} />
         </Tooltip>
+        <div className="relative">
+          <AmbientSoundscape />
+        </div>
         <Tooltip content={isFocusMode ? 'Exit focus mode (Space)' : 'Focus mode (Space)'}>
           <Button variant={isFocusMode ? 'primary' : 'ghost'} size="sm" onClick={onToggleFocus} icon={isFocusMode ? <EyeOff size={15} /> : <Eye size={15} />} />
         </Tooltip>

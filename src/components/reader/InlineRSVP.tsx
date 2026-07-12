@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Play, Pause, SkipBack, SkipForward, X, Minus, Plus, ChevronRight, ChevronLeft } from 'lucide-react'
+import { Play, Pause, SkipBack, SkipForward, X, Minus, Plus, ChevronRight, ChevronLeft, Zap, Eye, EyeOff, Timer } from 'lucide-react'
 import type { WordPos } from '@/components/pdf/PDFPageRenderer'
 
 interface InlineRSVPProps {
@@ -57,6 +57,28 @@ function buildPositionMap(tokens: string[], positions: WordPos[]): Map<number, W
   return map
 }
 
+// Detect sentence-ending punctuation for smart pause
+function isSentenceEnd(word: string): boolean {
+  return /[.!?;:]$/.test(word)
+}
+
+// Detect paragraph-break-worthy punctuation
+function isParagraphBreak(word: string): boolean {
+  return /[.!?]$/.test(word)
+}
+
+// Bionic reading: bold first N letters
+function BionicWord({ word, boldChars = 3 }: { word: string; boldChars?: number }) {
+  const bold = word.slice(0, Math.min(boldChars, word.length))
+  const rest = word.slice(Math.min(boldChars, word.length))
+  return (
+    <span>
+      <span className="font-bold" style={{ color: 'var(--color-accent)' }}>{bold}</span>
+      <span className="font-normal opacity-70">{rest}</span>
+    </span>
+  )
+}
+
 export function InlineRSVP({
   text,
   wordPositions,
@@ -75,11 +97,31 @@ export function InlineRSVP({
   const [wpm, setWpm] = useState(300)
   const [showControls, setShowControls] = useState(true)
   const [isTransitioning, setIsTransitioning] = useState(false)
+  const [bionicMode, setBionicMode] = useState(true)
+  const [focusTunnel, setFocusTunnel] = useState(false)
+  const [smartPauseEnabled, setSmartPauseEnabled] = useState(true)
+  const [isSmartPaused, setIsSmartPaused] = useState(false)
+  const [showFocusGuide, setShowFocusGuide] = useState(true)
+
+  // Flow score tracking
+  const [flowScore, setFlowScore] = useState(100)
+  const [readingStreak, setReadingStreak] = useState(0)
+  const [avgWpm, setAvgWpm] = useState(0)
+  const wpmHistoryRef = useRef<number[]>([])
+
+  // Reading rhythm — visual beat
+  const [beatActive, setBeatActive] = useState(false)
+
+  // Transition animation state
+  const [displayWord, setDisplayWord] = useState('')
+  const [wordAnimKey, setWordAnimKey] = useState(0)
+
   const intervalRef = useRef<ReturnType<typeof setInterval>>(undefined)
   const controlsTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   const prevTextRef = useRef(text)
-  const prevStartIndexRef = useRef(-1) // start at -1 so first startIndex triggers
+  const prevStartIndexRef = useRef(-1)
   const autoPlayRef = useRef(autoPlay)
+  const smartPauseTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
 
   autoPlayRef.current = autoPlay
 
@@ -92,6 +134,7 @@ export function InlineRSVP({
       setCurrentIndex(0)
       prevStartIndexRef.current = -1
       setIsTransitioning(false)
+      setDisplayWord('')
       if (autoPlayRef.current) {
         setTimeout(() => setIsPlaying(true), 300)
       }
@@ -103,10 +146,82 @@ export function InlineRSVP({
     if (startIndex >= 0 && startIndex < tokens.length && startIndex !== prevStartIndexRef.current) {
       prevStartIndexRef.current = startIndex
       setCurrentIndex(startIndex)
-      // Auto-play from the clicked word
       setTimeout(() => setIsPlaying(true), 100)
     }
   }, [startIndex, tokens.length])
+
+  // Smooth word transition with scale/fade animation
+  useEffect(() => {
+    const word = tokens[currentIndex] || ''
+    if (word !== displayWord) {
+      // Trigger exit animation, then swap word
+      setWordAnimKey((k) => k + 1)
+      // Small delay so exit plays, then enter
+      const t = setTimeout(() => setDisplayWord(word), 30)
+      return () => clearTimeout(t)
+    }
+  }, [currentIndex, tokens, displayWord])
+
+  // Reading rhythm beat — pulses with each word
+  useEffect(() => {
+    if (isPlaying) {
+      setBeatActive(true)
+      const t = setTimeout(() => setBeatActive(false), 100)
+      return () => clearTimeout(t)
+    }
+  }, [currentIndex, isPlaying])
+
+  // Flow score calculation — consistency of WPM over time
+  useEffect(() => {
+    if (isPlaying && wpm > 0) {
+      const history = wpmHistoryRef.current
+      history.push(wpm)
+      if (history.length > 20) history.shift()
+
+      // Calculate average
+      const avg = history.reduce((a, b) => a + b, 0) / history.length
+      setAvgWpm(Math.round(avg))
+
+      // Calculate consistency (lower std dev = higher score)
+      const variance = history.reduce((sum, v) => sum + Math.pow(v - avg, 2), 0) / history.length
+      const stdDev = Math.sqrt(variance)
+      const consistency = Math.max(0, 100 - stdDev / 2)
+
+      // Flow = consistency × reading momentum
+      const momentum = Math.min(1, history.length / 10)
+      setFlowScore(Math.round(consistency * momentum))
+      setReadingStreak((s) => s + 1)
+    }
+  }, [currentIndex, isPlaying, wpm])
+
+  // Smart pause — detect sentence ends
+  useEffect(() => {
+    if (!smartPauseEnabled || !isPlaying) return
+    const word = tokens[currentIndex]
+    if (word && isParagraphBreak(word)) {
+      // Longer pause at paragraph breaks
+      setIsSmartPaused(true)
+      setIsPlaying(false)
+      smartPauseTimerRef.current = setTimeout(() => {
+        setIsSmartPaused(false)
+        setIsPlaying(true)
+      }, 1200)
+      return () => clearTimeout(smartPauseTimerRef.current)
+    }
+    if (word && isSentenceEnd(word)) {
+      // Micro-pause at sentence ends
+      const currentInterval = (60 / wpm) * 1000
+      clearInterval(intervalRef.current)
+      smartPauseTimerRef.current = setTimeout(() => {
+        // Resume from next word after pause
+        setCurrentIndex((prev) => {
+          if (prev >= tokens.length - 1) return prev
+          return prev + 1
+        })
+      }, currentInterval * 2.5)
+      return () => clearTimeout(smartPauseTimerRef.current)
+    }
+  }, [currentIndex, isPlaying, smartPauseEnabled, tokens, wpm])
 
   const currentWord = tokens[currentIndex] || ''
   const currentPos = posMap.get(currentIndex)
@@ -156,7 +271,7 @@ export function InlineRSVP({
 
   // Auto-play interval
   useEffect(() => {
-    if (isPlaying && !isTransitioning) {
+    if (isPlaying && !isTransitioning && !isSmartPaused) {
       intervalRef.current = setInterval(() => {
         setCurrentIndex((prev) => {
           if (prev >= tokens.length - 1) {
@@ -169,7 +284,7 @@ export function InlineRSVP({
       }, (60 / wpm) * 1000)
     }
     return () => clearInterval(intervalRef.current)
-  }, [isPlaying, wpm, tokens.length, isTransitioning, advanceToNextPage])
+  }, [isPlaying, wpm, tokens.length, isTransitioning, advanceToNextPage, isSmartPaused])
 
   // Hide controls after inactivity
   useEffect(() => {
@@ -189,6 +304,7 @@ export function InlineRSVP({
     }
     setIsPlaying(true)
     setIsTransitioning(false)
+    setIsSmartPaused(false)
     setShowControls(true)
   }, [currentIndex, tokens.length, onPageStart])
 
@@ -201,52 +317,14 @@ export function InlineRSVP({
   const handlePrevWord = useCallback(() => {
     setIsPlaying(false)
     setShowControls(true)
-    setCurrentIndex((p) => {
-      const next = Math.max(0, p - 1)
-      // Scroll to show the previous word
-      const pos = posMap.get(next)
-      if (pos && pageContainerRef?.current) {
-        const scrollContainer = pageContainerRef.current.closest('[class*="overflow-auto"]') as HTMLElement | null
-        if (scrollContainer) {
-          const pageRect = pageContainerRef.current.getBoundingClientRect()
-          const scrollRect = scrollContainer.getBoundingClientRect()
-          const wordY = pageRect.top - scrollRect.top + pos.y - scrollContainer.scrollTop
-          if (wordY < scrollRect.height * 0.3 || wordY > scrollRect.height * 0.6) {
-            scrollContainer.scrollTo({
-              top: scrollContainer.scrollTop + wordY - scrollRect.height * 0.4,
-              behavior: 'smooth',
-            })
-          }
-        }
-      }
-      return next
-    })
-  }, [posMap, pageContainerRef])
+    setCurrentIndex((p) => Math.max(0, p - 1))
+  }, [])
 
   const handleNextWord = useCallback(() => {
     setIsPlaying(false)
     setShowControls(true)
-    setCurrentIndex((p) => {
-      const next = Math.min(tokens.length - 1, p + 1)
-      // Scroll to show the next word
-      const pos = posMap.get(next)
-      if (pos && pageContainerRef?.current) {
-        const scrollContainer = pageContainerRef.current.closest('[class*="overflow-auto"]') as HTMLElement | null
-        if (scrollContainer) {
-          const pageRect = pageContainerRef.current.getBoundingClientRect()
-          const scrollRect = scrollContainer.getBoundingClientRect()
-          const wordY = pageRect.top - scrollRect.top + pos.y - scrollContainer.scrollTop
-          if (wordY > scrollRect.height * 0.55) {
-            scrollContainer.scrollTo({
-              top: scrollContainer.scrollTop + wordY - scrollRect.height * 0.35,
-              behavior: 'smooth',
-            })
-          }
-        }
-      }
-      return next
-    })
-  }, [tokens.length, posMap, pageContainerRef])
+    setCurrentIndex((p) => Math.min(tokens.length - 1, p + 1))
+  }, [tokens.length])
 
   // Keyboard — use stopImmediatePropagation to prevent ReaderPage from also handling
   useEffect(() => {
@@ -256,8 +334,10 @@ export function InlineRSVP({
       if (e.key === 'ArrowLeft') { e.stopImmediatePropagation(); handlePrevWord(); return }
       if (e.key === 'ArrowRight') { e.stopImmediatePropagation(); handleNextWord(); return }
       if (e.key === 'n' || e.key === 'Enter') { e.stopImmediatePropagation(); advanceToNextPage(); return }
+      if (e.key === 'b') { e.stopImmediatePropagation(); setBionicMode((b) => !b); return }
+      if (e.key === 'f') { e.stopImmediatePropagation(); setFocusTunnel((f) => !f); return }
     }
-    window.addEventListener('keydown', handleKey, true) // use capture phase
+    window.addEventListener('keydown', handleKey, true)
     return () => window.removeEventListener('keydown', handleKey, true)
   }, [isPlaying, onClose, handlePlay, handlePause, handlePrevWord, handleNextWord, advanceToNextPage])
 
@@ -269,13 +349,49 @@ export function InlineRSVP({
   }, [])
 
   const hasNextPage = (pageNumber || 0) < (totalPages || 0)
-
-  // Position control bar at top or bottom based on highlight position
   const controlsAtTop = highlight ? highlight.y > window.innerHeight * 0.6 : false
+
+  // Flow score color
+  const flowColor = flowScore > 70 ? '#22c55e' : flowScore > 40 ? '#eab308' : '#ef4444'
+  const flowLabel = flowScore > 70 ? 'Deep Flow' : flowScore > 40 ? 'Warming Up' : 'Getting Started'
 
   return (
     <>
-      {/* Highlight on the current word */}
+      {/* Focus Tunnel — radial gradient overlay */}
+      {focusTunnel && highlight && (
+        <div
+          className="fixed inset-0 pointer-events-none"
+          style={{
+            zIndex: 50,
+            background: `radial-gradient(ellipse 500px 300px at ${highlight.x + highlight.w / 2}px ${highlight.y + highlight.h / 2}px, transparent 0%, rgba(0,0,0,0.5) 60%, rgba(0,0,0,0.85) 100%)`,
+            transition: 'background 0.3s ease',
+          }}
+        />
+      )}
+
+      {/* Focus Guide Lines — horizontal reading zone */}
+      {showFocusGuide && highlight && (
+        <div className="fixed inset-0 pointer-events-none" style={{ zIndex: 49 }}>
+          {/* Top guide line */}
+          <div
+            className="absolute left-0 right-0 h-px"
+            style={{
+              top: highlight.y - 20,
+              background: 'linear-gradient(90deg, transparent 10%, rgba(var(--color-accent-rgb, 59, 130, 246), 0.15) 30%, rgba(var(--color-accent-rgb, 59, 130, 246), 0.15) 70%, transparent 90%)',
+            }}
+          />
+          {/* Bottom guide line */}
+          <div
+            className="absolute left-0 right-0 h-px"
+            style={{
+              top: highlight.y + highlight.h + 20,
+              background: 'linear-gradient(90deg, transparent 10%, rgba(var(--color-accent-rgb, 59, 130, 246), 0.15) 30%, rgba(var(--color-accent-rgb, 59, 130, 246), 0.15) 70%, transparent 90%)',
+            }}
+          />
+        </div>
+      )}
+
+      {/* Highlight on the current word — smooth animated */}
       {highlight && !isTransitioning && (
         <div
           className="fixed pointer-events-none"
@@ -291,25 +407,25 @@ export function InlineRSVP({
           <div
             className="absolute -inset-[10px] rounded-lg"
             style={{
-              background: 'rgba(var(--color-accent-rgb, 59, 130, 246), 0.15)',
-              boxShadow: '0 0 40px 8px rgba(var(--color-accent-rgb, 59, 130, 246), 0.3)',
+              background: 'rgba(var(--color-accent-rgb, 59, 130, 246), 0.12)',
+              boxShadow: '0 0 40px 8px rgba(var(--color-accent-rgb, 59, 130, 246), 0.25)',
+              transition: 'all 0.08s ease-out',
             }}
           />
           {/* Main highlight */}
-          <div
+          <motion.div
             className="absolute -inset-[6px] rounded-lg"
             style={{
-              background: 'rgba(var(--color-accent-rgb, 59, 130, 246), 0.35)',
               border: '3px solid var(--color-accent)',
               boxShadow: '0 0 24px 4px rgba(var(--color-accent-rgb, 59, 130, 246), 0.4), inset 0 0 12px rgba(var(--color-accent-rgb, 59, 130, 246), 0.15)',
             }}
-          />
-          {/* Inner pulse */}
-          <div
-            className="absolute -inset-[6px] rounded-lg animate-pulse"
-            style={{
-              background: 'rgba(var(--color-accent-rgb, 59, 130, 246), 0.1)',
+            animate={{
+              scale: beatActive ? [1, 1.04, 1] : 1,
+              backgroundColor: beatActive
+                ? 'rgba(var(--color-accent-rgb, 59, 130, 246), 0.4)'
+                : 'rgba(var(--color-accent-rgb, 59, 130, 246), 0.25)',
             }}
+            transition={{ duration: 0.15, ease: 'easeOut' }}
           />
         </div>
       )}
@@ -325,26 +441,73 @@ export function InlineRSVP({
             transition={{ duration: 0.2 }}
             className={`fixed left-1/2 -translate-x-1/2 z-[70] ${controlsAtTop ? 'top-16' : 'bottom-20'}`}
           >
-            <div className="bg-[var(--color-surface-0)]/95 backdrop-blur-2xl border border-[var(--color-surface-3)] rounded-2xl shadow-[0_8px_40px_rgba(0,0,0,0.15)] overflow-hidden">
-              {/* Current word display */}
-              <div className="px-6 pt-3 pb-1">
+            <div className="bg-[var(--color-surface-0)]/95 backdrop-blur-2xl border border-[var(--color-surface-3)] rounded-2xl shadow-[0_8px_40px_rgba(0,0,0,0.15)] overflow-hidden w-[420px]">
+              {/* Smart Pause indicator */}
+              {isSmartPaused && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  className="px-4 py-2 bg-amber-500/10 border-b border-amber-500/20 flex items-center gap-2"
+                >
+                  <Timer size={14} className="text-amber-500" />
+                  <span className="text-xs text-amber-600 dark:text-amber-400">Comprehension pause — tap space to continue</span>
+                </motion.div>
+              )}
+
+              {/* Current word display — bionic reading mode */}
+              <div className="px-6 pt-4 pb-2">
                 <div className="text-center" style={{ fontFamily: 'var(--font-reading)' }}>
-                  <span className="text-lg font-bold text-[var(--color-accent)]">{currentWord}</span>
+                  <AnimatePresence mode="wait">
+                    <motion.div
+                      key={wordAnimKey}
+                      initial={{ opacity: 0.3, scale: 0.92, y: 4 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 1.06, y: -4 }}
+                      transition={{ duration: 0.08, ease: [0.25, 0.1, 0.25, 1] }}
+                      className="text-xl font-bold"
+                    >
+                      {bionicMode ? (
+                        <BionicWord word={displayWord || currentWord} boldChars={3} />
+                      ) : (
+                        <span className="text-[var(--color-accent)]">{displayWord || currentWord}</span>
+                      )}
+                    </motion.div>
+                  </AnimatePresence>
                 </div>
               </div>
 
-              {/* Progress */}
+              {/* Flow Score + Progress */}
               <div className="px-5">
-                <div className="relative h-1 bg-[var(--color-surface-3)] rounded-full overflow-hidden">
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center gap-2">
+                    <div
+                      className="w-2 h-2 rounded-full"
+                      style={{ backgroundColor: flowColor, boxShadow: `0 0 6px ${flowColor}` }}
+                    />
+                    <span className="text-[10px] font-medium" style={{ color: flowColor }}>
+                      {flowLabel}
+                    </span>
+                    <span className="text-[9px] text-[var(--color-text-tertiary)] tabular-nums">
+                      {flowScore}%
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-[var(--color-text-tertiary)] tabular-nums">
+                    ~{avgWpm || wpm} WPM
+                  </span>
+                </div>
+                <div className="relative h-1.5 bg-[var(--color-surface-3)] rounded-full overflow-hidden">
                   <motion.div
-                    className="absolute inset-y-0 left-0 bg-gradient-to-r from-[var(--color-accent)] to-purple-500 rounded-full"
+                    className="absolute inset-y-0 left-0 rounded-full"
+                    style={{
+                      background: `linear-gradient(90deg, ${flowColor}, var(--color-accent))`,
+                    }}
                     animate={{ width: `${progress}%` }}
                     transition={{ duration: 0.1 }}
                   />
                 </div>
                 <div className="flex items-center justify-between mt-1.5">
                   <span className="text-[10px] text-[var(--color-text-tertiary)] tabular-nums">
-                    Word {currentIndex + 1} of {tokens.length}
+                    {currentIndex + 1} / {tokens.length}
                   </span>
                   <span className="text-[10px] text-[var(--color-text-tertiary)]">
                     Page {pageNumber || '?'}
@@ -353,37 +516,25 @@ export function InlineRSVP({
               </div>
 
               {/* Controls */}
-              <div className="px-4 py-3 flex items-center justify-between gap-2">
+              <div className="px-4 py-3 flex items-center justify-between gap-1">
                 {/* WPM control */}
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-0.5">
                   <button onClick={() => setWpm((w) => Math.max(100, w - 25))} className="p-1.5 rounded-lg text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-2)] transition-colors">
                     <Minus size={14} />
                   </button>
-                  <span className="text-xs font-semibold text-[var(--color-accent)] tabular-nums w-14 text-center">
-                    {wpm} <span className="text-[9px] font-normal text-[var(--color-text-tertiary)]">WPM</span>
+                  <span className="text-xs font-semibold text-[var(--color-accent)] tabular-nums w-12 text-center">
+                    {wpm}
                   </span>
                   <button onClick={() => setWpm((w) => Math.min(800, w + 25))} className="p-1.5 rounded-lg text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-2)] transition-colors">
                     <Plus size={14} />
                   </button>
                 </div>
 
-                {/* Playback controls with word nav */}
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={handlePrevWord}
-                    className="p-2 rounded-lg text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-2)] transition-colors"
-                    title="Previous word (←)"
-                  >
+                {/* Playback controls */}
+                <div className="flex items-center gap-0.5">
+                  <button onClick={handlePrevWord} className="p-1.5 rounded-lg text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-2)] transition-colors" title="Previous word (←)">
                     <ChevronLeft size={16} />
                   </button>
-                  <button
-                    onClick={handlePrevWord}
-                    className="p-1.5 rounded-lg text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-2)] transition-colors"
-                    title="Back 1 word"
-                  >
-                    <SkipBack size={14} />
-                  </button>
-
                   <button
                     onClick={() => isPlaying ? handlePause() : handlePlay()}
                     className="p-3 rounded-xl bg-[var(--color-accent)] text-white hover:bg-[var(--color-accent-hover)] transition-colors shadow-lg shadow-[var(--color-accent)]/25 mx-1"
@@ -391,31 +542,40 @@ export function InlineRSVP({
                   >
                     {isPlaying ? <Pause size={18} /> : <Play size={18} className="ml-0.5" />}
                   </button>
-
-                  <button
-                    onClick={handleNextWord}
-                    className="p-1.5 rounded-lg text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-2)] transition-colors"
-                    title="Forward 1 word"
-                  >
-                    <SkipForward size={14} />
-                  </button>
-                  <button
-                    onClick={handleNextWord}
-                    className="p-2 rounded-lg text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-2)] transition-colors"
-                    title="Next word (→)"
-                  >
+                  <button onClick={handleNextWord} className="p-1.5 rounded-lg text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-2)] transition-colors" title="Next word (→)">
                     <ChevronRight size={16} />
                   </button>
                 </div>
 
-                {/* Page nav & close */}
-                <div className="flex items-center gap-1">
+                {/* Feature toggles + close */}
+                <div className="flex items-center gap-0.5">
+                  <button
+                    onClick={() => setBionicMode((b) => !b)}
+                    className={`p-1.5 rounded-lg transition-colors ${bionicMode ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)]' : 'text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-2)]'}`}
+                    title="Bionic reading (B)"
+                  >
+                    <Zap size={14} />
+                  </button>
+                  <button
+                    onClick={() => setFocusTunnel((f) => !f)}
+                    className={`p-1.5 rounded-lg transition-colors ${focusTunnel ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)]' : 'text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-2)]'}`}
+                    title="Focus tunnel (F)"
+                  >
+                    {focusTunnel ? <Eye size={14} /> : <EyeOff size={14} />}
+                  </button>
+                  <button
+                    onClick={() => setSmartPauseEnabled((p) => !p)}
+                    className={`p-1.5 rounded-lg transition-colors ${smartPauseEnabled ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)]' : 'text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-2)]'}`}
+                    title="Smart pause"
+                  >
+                    <Timer size={14} />
+                  </button>
                   {hasNextPage && (
                     <button
                       onClick={advanceToNextPage}
                       className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium text-[var(--color-accent)] hover:bg-[var(--color-accent-muted)] transition-colors"
                     >
-                      Next pg <ChevronRight size={12} />
+                      Next <ChevronRight size={12} />
                     </button>
                   )}
                   <button onClick={onClose} className="p-1.5 rounded-lg text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-2)] transition-colors">
