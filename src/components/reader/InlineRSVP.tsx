@@ -125,7 +125,7 @@ export function InlineRSVP({
   const [beatActive, setBeatActive] = useState(false)
 
   // Transition animation state
-  const [displayWord, setDisplayWord] = useState('')
+  const [displayWord, setDisplayWord] = useState(() => tokens[0] || '')
   const [wordAnimKey, setWordAnimKey] = useState(0)
 
   const intervalRef = useRef<ReturnType<typeof setInterval>>(undefined)
@@ -165,14 +165,9 @@ export function InlineRSVP({
   // Smooth word transition with scale/fade animation
   useEffect(() => {
     const word = tokens[currentIndex] || ''
-    if (word !== displayWord) {
-      // Trigger exit animation, then swap word
-      setWordAnimKey((k) => k + 1)
-      // Small delay so exit plays, then enter
-      const t = setTimeout(() => setDisplayWord(word), 30)
-      return () => clearTimeout(t)
-    }
-  }, [currentIndex, tokens, displayWord])
+    setDisplayWord(word)
+    setWordAnimKey((k) => k + 1)
+  }, [currentIndex, tokens])
 
   // Reading rhythm beat — pulses with each word
   useEffect(() => {
@@ -211,29 +206,11 @@ export function InlineRSVP({
     if (!smartPauseEnabled || !isPlaying) return
     const word = tokens[currentIndex]
     if (word && isParagraphBreak(word)) {
-      // Longer pause at paragraph breaks
+      // Pause at paragraph breaks — user resumes with space
       setIsSmartPaused(true)
       setIsPlaying(false)
-      smartPauseTimerRef.current = setTimeout(() => {
-        setIsSmartPaused(false)
-        setIsPlaying(true)
-      }, 1200)
-      return () => clearTimeout(smartPauseTimerRef.current)
     }
-    if (word && isSentenceEnd(word)) {
-      // Micro-pause at sentence ends
-      const currentInterval = (60 / wpm) * 1000
-      clearInterval(intervalRef.current)
-      smartPauseTimerRef.current = setTimeout(() => {
-        // Resume from next word after pause
-        setCurrentIndex((prev) => {
-          if (prev >= tokens.length - 1) return prev
-          return prev + 1
-        })
-      }, currentInterval * 2.5)
-      return () => clearTimeout(smartPauseTimerRef.current)
-    }
-  }, [currentIndex, isPlaying, smartPauseEnabled, tokens, wpm])
+  }, [currentIndex, isPlaying, smartPauseEnabled, tokens])
 
   const currentWord = tokens[currentIndex] || ''
   const currentPos = posMap.get(currentIndex)
@@ -251,25 +228,8 @@ export function InlineRSVP({
     }
   }, [currentIndex, currentPos, pageContainerRef])
 
-  // SCROLL: keep the current word visible by scrolling down when needed
-  useEffect(() => {
-    if (!highlight || isTransitioning || !isPlaying) return
-    if (!pageContainerRef?.current) return
-
-    const scrollContainer = pageContainerRef.current.closest('[class*="overflow-auto"]') as HTMLElement | null
-    if (!scrollContainer) return
-
-    const scrollRect = scrollContainer.getBoundingClientRect()
-    const wordRelativeY = highlight.y - scrollRect.top
-    const viewportHeight = scrollRect.height
-
-    if (wordRelativeY > viewportHeight * 0.6) {
-      const scrollTarget = scrollContainer.scrollTop + (wordRelativeY - viewportHeight * 0.35)
-      if (scrollTarget > scrollContainer.scrollTop) {
-        scrollContainer.scrollTo({ top: scrollTarget, behavior: 'smooth' })
-      }
-    }
-  }, [highlight, isTransitioning, isPlaying, pageContainerRef])
+  // NO auto-scroll during RSVP — page stays still, word shown in control bar
+  // This prevents focus shifting and disorientation
 
   // Auto-advance to next page
   const advanceToNextPage = useCallback(() => {
@@ -287,8 +247,13 @@ export function InlineRSVP({
       intervalRef.current = setInterval(() => {
         setCurrentIndex((prev) => {
           if (prev >= tokens.length - 1) {
+            // Reached end of page — stop here, don't auto-advance
+            // User manually advances with Next button or Enter key
             clearInterval(intervalRef.current)
-            setTimeout(() => advanceToNextPage(), 150)
+            setTimeout(() => {
+              setIsPlaying(false)
+              setShowControls(true)
+            }, 200)
             return prev
           }
           return prev + 1
@@ -296,7 +261,7 @@ export function InlineRSVP({
       }, (60 / wpm) * 1000)
     }
     return () => clearInterval(intervalRef.current)
-  }, [isPlaying, wpm, tokens.length, isTransitioning, advanceToNextPage, isSmartPaused])
+  }, [isPlaying, wpm, tokens.length, isTransitioning, isSmartPaused])
 
   // Hide controls after inactivity
   useEffect(() => {
@@ -375,8 +340,8 @@ export function InlineRSVP({
           className="fixed inset-0 pointer-events-none"
           style={{
             zIndex: 50,
-            background: `radial-gradient(ellipse 500px 300px at ${highlight.x + highlight.w / 2}px ${highlight.y + highlight.h / 2}px, transparent 0%, rgba(0,0,0,0.5) 60%, rgba(0,0,0,0.85) 100%)`,
-            transition: 'background 0.3s ease',
+            background: `radial-gradient(ellipse 400px 200px at ${highlight.x + highlight.w / 2}px ${highlight.y + highlight.h / 2}px, transparent 0%, rgba(0,0,0,0.4) 50%, rgba(0,0,0,0.8) 100%)`,
+            transition: 'all 0.25s ease-out',
           }}
         />
       )}
@@ -388,56 +353,50 @@ export function InlineRSVP({
           <div
             className="absolute left-0 right-0 h-px"
             style={{
-              top: highlight.y - 20,
-              background: 'linear-gradient(90deg, transparent 10%, rgba(var(--color-accent-rgb, 59, 130, 246), 0.15) 30%, rgba(var(--color-accent-rgb, 59, 130, 246), 0.15) 70%, transparent 90%)',
+              top: highlight.y - 16,
+              background: 'linear-gradient(90deg, transparent 15%, rgba(234, 179, 8, 0.2) 30%, rgba(234, 179, 8, 0.2) 70%, transparent 85%)',
             }}
           />
           {/* Bottom guide line */}
           <div
             className="absolute left-0 right-0 h-px"
             style={{
-              top: highlight.y + highlight.h + 20,
-              background: 'linear-gradient(90deg, transparent 10%, rgba(var(--color-accent-rgb, 59, 130, 246), 0.15) 30%, rgba(var(--color-accent-rgb, 59, 130, 246), 0.15) 70%, transparent 90%)',
+              top: highlight.y + highlight.h + 16,
+              background: 'linear-gradient(90deg, transparent 15%, rgba(234, 179, 8, 0.2) 30%, rgba(234, 179, 8, 0.2) 70%, transparent 85%)',
             }}
           />
         </div>
       )}
 
-      {/* Highlight on the current word — smooth animated */}
+      {/* Highlight on the current word — real highlighter effect */}
       {highlight && !isTransitioning && (
         <div
           className="fixed pointer-events-none"
           style={{
-            left: highlight.x,
-            top: highlight.y,
-            width: highlight.w,
-            height: highlight.h,
+            left: highlight.x - 2,
+            top: highlight.y - 1,
+            width: highlight.w + 4,
+            height: highlight.h + 2,
             zIndex: 55,
           }}
         >
-          {/* Outer glow */}
-          <div
-            className="absolute -inset-[10px] rounded-lg"
-            style={{
-              background: 'rgba(var(--color-accent-rgb, 59, 130, 246), 0.12)',
-              boxShadow: '0 0 40px 8px rgba(var(--color-accent-rgb, 59, 130, 246), 0.25)',
-              transition: 'all 0.08s ease-out',
-            }}
-          />
-          {/* Main highlight */}
+          {/* Yellow highlighter background */}
           <motion.div
-            className="absolute -inset-[6px] rounded-lg"
+            className="absolute inset-0 rounded-sm"
             style={{
-              border: '3px solid var(--color-accent)',
-              boxShadow: '0 0 24px 4px rgba(var(--color-accent-rgb, 59, 130, 246), 0.4), inset 0 0 12px rgba(var(--color-accent-rgb, 59, 130, 246), 0.15)',
+              background: 'linear-gradient(180deg, rgba(250, 204, 21, 0.45) 0%, rgba(250, 204, 21, 0.35) 100%)',
+              boxShadow: '0 0 12px 2px rgba(250, 204, 21, 0.3)',
             }}
             animate={{
-              scale: beatActive ? [1, 1.04, 1] : 1,
-              backgroundColor: beatActive
-                ? 'rgba(var(--color-accent-rgb, 59, 130, 246), 0.4)'
-                : 'rgba(var(--color-accent-rgb, 59, 130, 246), 0.25)',
+              scale: beatActive ? [1, 1.02, 1] : 1,
+              opacity: beatActive ? [0.85, 1, 0.85] : 0.9,
             }}
             transition={{ duration: 0.15, ease: 'easeOut' }}
+          />
+          {/* Subtle top edge — like a real marker stroke */}
+          <div
+            className="absolute top-0 left-0 right-0 h-px"
+            style={{ background: 'rgba(234, 179, 8, 0.5)' }}
           />
         </div>
       )}
