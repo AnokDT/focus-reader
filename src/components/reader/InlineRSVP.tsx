@@ -41,11 +41,10 @@ function buildPositionMap(tokens: string[], positions: WordPos[]): Map<number, W
     }
     if (!found && positions.length > 0) {
       const prevPos = positions[Math.max(0, posIdx - 1)]
-      const nextPos = positions[Math.min(posIdx, positions.length - 1)]
       map.set(t, {
         word: tokens[t],
-        x: (prevPos.x + nextPos.x) / 2 + t * 40,
-        y: (prevPos.y + nextPos.y) / 2,
+        x: prevPos.x + t * 40,
+        y: prevPos.y,
         width: tokens[t].length * 10,
         height: prevPos.height,
       })
@@ -60,12 +59,10 @@ function isParagraphBreak(word: string): boolean {
 
 function BionicWord({ word }: { word: string }) {
   const split = Math.min(3, word.length)
-  const bold = word.slice(0, split)
-  const rest = word.slice(split)
   return (
     <span className="select-none">
-      <span className="font-black" style={{ color: 'var(--color-accent)', fontSize: '1.1em' }}>{bold}</span>
-      <span className="font-normal opacity-45">{rest}</span>
+      <span className="font-black" style={{ color: 'var(--color-accent)', fontSize: '1.1em' }}>{word.slice(0, split)}</span>
+      <span className="font-normal opacity-45">{word.slice(split)}</span>
     </span>
   )
 }
@@ -97,8 +94,6 @@ export function InlineRSVP({
   const [avgWpm, setAvgWpm] = useState(0)
   const wpmHistoryRef = useRef<number[]>([])
 
-  const [wordAnimKey, setWordAnimKey] = useState(0)
-
   const intervalRef = useRef<ReturnType<typeof setInterval>>(undefined)
   const controlsTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   const prevTextRef = useRef(text)
@@ -115,9 +110,7 @@ export function InlineRSVP({
       setCurrentIndex(0)
       prevStartIndexRef.current = -1
       setIsTransitioning(false)
-      if (autoPlayRef.current) {
-        setTimeout(() => setIsPlaying(true), 300)
-      }
+      if (autoPlayRef.current) setTimeout(() => setIsPlaying(true), 300)
     }
   }, [text])
 
@@ -128,11 +121,6 @@ export function InlineRSVP({
       setTimeout(() => setIsPlaying(true), 100)
     }
   }, [startIndex, tokens.length])
-
-  // Word changes — trigger animation
-  useEffect(() => {
-    setWordAnimKey((k) => k + 1)
-  }, [currentIndex])
 
   // Flow score
   useEffect(() => {
@@ -148,7 +136,7 @@ export function InlineRSVP({
     }
   }, [currentIndex, isPlaying, wpm])
 
-  // Smart pause at paragraph breaks
+  // Smart pause
   useEffect(() => {
     if (!smartPauseEnabled || !isPlaying) return
     const word = tokens[currentIndex]
@@ -162,19 +150,45 @@ export function InlineRSVP({
   const currentPos = posMap.get(currentIndex)
   const progress = tokens.length > 0 ? (currentIndex / tokens.length) * 100 : 0
 
-  // Highlight on the PDF page
+  // Highlight position ON the actual PDF text
   const highlight = useMemo(() => {
     if (currentIndex >= tokens.length || !pageContainerRef?.current || !currentPos) return null
-    const pageRect = pageContainerRef.current.getBoundingClientRect()
+    const containerRect = pageContainerRef.current.getBoundingClientRect()
     return {
-      x: pageRect.left + currentPos.x,
-      y: pageRect.top + currentPos.y,
+      x: containerRect.left + currentPos.x,
+      y: containerRect.top + currentPos.y,
       w: Math.max(currentPos.width, 30),
       h: Math.max(currentPos.height, 14),
     }
   }, [currentIndex, currentPos, pageContainerRef])
 
-  // NO auto-scroll — page stays still
+  // AUTO-SCROLL: follow the highlight down the page
+  useEffect(() => {
+    if (!highlight || !isPlaying || isTransitioning) return
+    if (!pageContainerRef?.current) return
+
+    const scrollContainer = pageContainerRef.current.closest('[class*="overflow-auto"]') as HTMLElement | null
+    if (!scrollContainer) return
+
+    const scrollRect = scrollContainer.getBoundingClientRect()
+    const wordRelativeY = highlight.y - scrollRect.top
+    const viewportHeight = scrollRect.height
+
+    // Scroll down when word is in bottom 40% of viewport
+    if (wordRelativeY > viewportHeight * 0.6) {
+      const scrollAmount = wordRelativeY - viewportHeight * 0.35
+      if (scrollAmount > 0) {
+        scrollContainer.scrollBy({ top: scrollAmount, behavior: 'smooth' })
+      }
+    }
+    // Scroll up when word is in top 20% of viewport
+    else if (wordRelativeY < viewportHeight * 0.2) {
+      const scrollAmount = viewportHeight * 0.35 - wordRelativeY
+      if (scrollAmount > 0) {
+        scrollContainer.scrollBy({ top: -scrollAmount, behavior: 'smooth' })
+      }
+    }
+  }, [highlight, isPlaying, isTransitioning, pageContainerRef])
 
   const advanceToNextPage = useCallback(() => {
     if (!onPageEnd) { setIsPlaying(false); return }
@@ -199,7 +213,6 @@ export function InlineRSVP({
     return () => clearInterval(intervalRef.current)
   }, [isPlaying, wpm, tokens.length, isTransitioning, isSmartPaused])
 
-  // Hide controls after inactivity
   useEffect(() => {
     if (showControls) {
       clearTimeout(controlsTimeoutRef.current)
@@ -265,90 +278,55 @@ export function InlineRSVP({
 
   return (
     <>
-      {/* Focus Tunnel — dim everything except center */}
-      {focusTunnel && (
+      {/* Focus Tunnel — dim everything except highlight area */}
+      {focusTunnel && highlight && (
         <div
           className="fixed inset-0 pointer-events-none"
           style={{
             zIndex: 50,
-            background: 'radial-gradient(ellipse 500px 250px at 50% 50%, transparent 0%, rgba(0,0,0,0.5) 55%, rgba(0,0,0,0.85) 100%)',
-            transition: 'all 0.25s ease-out',
+            background: `radial-gradient(ellipse 600px 120px at ${highlight.x + highlight.w / 2}px ${highlight.y + highlight.h / 2}px, transparent 0%, rgba(0,0,0,0.45) 50%, rgba(0,0,0,0.85) 100%)`,
+            transition: 'all 0.2s ease-out',
           }}
         />
       )}
 
-      {/* Yellow highlighter on the PDF word */}
+      {/* BIG YELLOW HIGHLIGHTER on the actual PDF text */}
       {highlight && !isTransitioning && (
         <div
           className="fixed pointer-events-none"
           style={{
-            left: highlight.x - 2,
-            top: highlight.y - 1,
-            width: highlight.w + 4,
-            height: highlight.h + 2,
+            left: highlight.x - 4,
+            top: highlight.y - 2,
+            width: highlight.w + 8,
+            height: highlight.h + 4,
             zIndex: 55,
           }}
         >
-          <motion.div
+          {/* Outer glow */}
+          <div
+            className="absolute -inset-[8px] rounded-lg"
+            style={{
+              background: 'rgba(250, 204, 21, 0.12)',
+              boxShadow: '0 0 30px 8px rgba(250, 204, 21, 0.25)',
+            }}
+          />
+          {/* Main highlighter */}
+          <div
             className="absolute inset-0 rounded-sm"
             style={{
-              background: 'linear-gradient(180deg, rgba(250, 204, 21, 0.5) 0%, rgba(250, 204, 21, 0.4) 100%)',
-              boxShadow: '0 0 16px 4px rgba(250, 204, 21, 0.35)',
+              background: 'linear-gradient(180deg, rgba(250, 204, 21, 0.55) 0%, rgba(250, 204, 21, 0.4) 100%)',
+              boxShadow: '0 0 12px 2px rgba(250, 204, 21, 0.3), inset 0 1px 0 rgba(255,255,255,0.2)',
             }}
-            animate={{ scale: [1, 1.02, 1] }}
-            transition={{ duration: 0.12 }}
+          />
+          {/* Top marker stroke */}
+          <div
+            className="absolute top-0 left-0 right-0 h-[2px] rounded-full"
+            style={{ background: 'rgba(234, 179, 8, 0.6)' }}
           />
         </div>
       )}
 
-      {/* FIXED CENTER WORD — eye locks here, ZERO movement */}
-      {!isTransitioning && currentWord && (
-        <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none" style={{ zIndex: 60 }}>
-          {/* Fixation dot — eye anchor point, NEVER moves */}
-          <div
-            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-2 h-2 rounded-full"
-            style={{
-              background: 'var(--color-accent)',
-              boxShadow: '0 0 8px 2px rgba(var(--color-accent-rgb, 59, 130, 246), 0.4)',
-              opacity: 0.6,
-              zIndex: 62,
-            }}
-          />
-
-          {/* Background card — opaque, blocks PDF behind */}
-          <div
-            className="px-12 py-5 rounded-2xl relative"
-            style={{
-              background: 'var(--color-surface-0)',
-              border: '2px solid var(--color-accent)',
-              boxShadow: '0 0 80px 20px rgba(var(--color-accent-rgb, 59, 130, 246), 0.12), 0 12px 40px rgba(0,0,0,0.25)',
-            }}
-          >
-            {/* Word — FADE ONLY, never moves */}
-            <div
-              className="text-center whitespace-nowrap transition-opacity duration-50"
-              style={{ fontFamily: 'var(--font-reading)', opacity: 1 }}
-              key={wordAnimKey}
-            >
-              {bionicMode ? (
-                <BionicWord word={currentWord} />
-              ) : (
-                <span className="font-bold text-[var(--color-text-primary)]" style={{ fontSize: '2rem' }}>
-                  {currentWord}
-                </span>
-              )}
-            </div>
-          </div>
-
-          <div className="text-center mt-2">
-            <span className="text-[11px] tabular-nums text-[var(--color-text-tertiary)]">
-              {currentIndex + 1} / {tokens.length} · Page {pageNumber || '?'}
-            </span>
-          </div>
-        </div>
-      )}
-
-      {/* Control bar — always bottom */}
+      {/* Control bar — always bottom, with current word */}
       <AnimatePresence>
         {showControls && (
           <motion.div
@@ -359,7 +337,7 @@ export function InlineRSVP({
             transition={{ duration: 0.2 }}
             className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[70]"
           >
-            <div className="bg-[var(--color-surface-0)]/95 backdrop-blur-2xl border border-[var(--color-surface-3)] rounded-2xl shadow-[0_8px_40px_rgba(0,0,0,0.2)] overflow-hidden w-[420px]">
+            <div className="bg-[var(--color-surface-0)]/95 backdrop-blur-2xl border border-[var(--color-surface-3)] rounded-2xl shadow-[0_8px_40px_rgba(0,0,0,0.2)] overflow-hidden w-[440px]">
               {isSmartPaused && (
                 <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="px-4 py-2 bg-amber-500/10 border-b border-amber-500/20 flex items-center gap-2">
                   <Timer size={14} className="text-amber-500" />
@@ -367,8 +345,17 @@ export function InlineRSVP({
                 </motion.div>
               )}
 
+              {/* Current word display */}
+              <div className="px-6 pt-3 pb-1">
+                <div className="text-center" style={{ fontFamily: 'var(--font-reading)' }}>
+                  <span className="text-lg font-bold text-[var(--color-accent)]">
+                    {bionicMode ? <BionicWord word={currentWord} /> : currentWord}
+                  </span>
+                </div>
+              </div>
+
               {/* Progress */}
-              <div className="px-5 pt-3">
+              <div className="px-5">
                 <div className="relative h-1 bg-[var(--color-surface-3)] rounded-full overflow-hidden">
                   <motion.div className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-yellow-400 to-amber-500" animate={{ width: `${progress}%` }} transition={{ duration: 0.1 }} />
                 </div>
@@ -400,7 +387,7 @@ export function InlineRSVP({
                 <div className="flex items-center gap-0.5">
                   <button onClick={() => setBionicMode((b) => !b)} className={`p-1.5 rounded-lg transition-colors ${bionicMode ? 'bg-yellow-400/15 text-yellow-600' : 'text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-2)]'}`} title="Bionic (B)"><Zap size={14} /></button>
                   <button onClick={() => setFocusTunnel((f) => !f)} className={`p-1.5 rounded-lg transition-colors ${focusTunnel ? 'bg-purple-500/15 text-purple-500' : 'text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-2)]'}`} title="Tunnel (F)">{focusTunnel ? <Eye size={14} /> : <EyeOff size={14} />}</button>
-                  <button onClick={() => setSmartPauseEnabled((p) => !p)} className={`p-1.5 rounded-lg transition-colors ${smartPauseEnabled ? 'bg-amber-500/15 text-amber-500' : 'text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-2)]'}`} title="Smart pause"><Timer size={14} /></button>
+                  <button onClick={() => setSmartPauseEnabled((p) => !p)} className={`p-1.5 rounded-lg transition-colors ${smartPauseEnabled ? 'bg-amber-500/15 text-amber-500' : 'text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-2)]'}`} title="Smart pause at sentences"><Timer size={14} /></button>
                   {hasNextPage && (
                     <button onClick={advanceToNextPage} className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium text-[var(--color-accent)] hover:bg-[var(--color-accent-muted)] transition-colors">Next <ChevronRight size={12} /></button>
                   )}
