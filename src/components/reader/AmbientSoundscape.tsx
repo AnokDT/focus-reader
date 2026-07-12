@@ -259,10 +259,13 @@ export function AmbientSoundscape() {
       {/* Toggle button */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className={`p-2 rounded-xl transition-all ${anyPlaying ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)]' : 'text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text-primary)]'}`}
-        title="Ambient sounds"
+        className={`relative p-2 rounded-xl transition-all ${anyPlaying ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)]' : 'text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text-primary)]'}`}
+        title="Focus Sounds — ambient background audio for concentration"
       >
         {anyPlaying ? <Volume2 size={18} /> : <VolumeX size={18} />}
+        {anyPlaying && (
+          <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-[var(--color-accent)] animate-pulse" />
+        )}
       </button>
 
       {/* Sound panel */}
@@ -284,7 +287,9 @@ export function AmbientSoundscape() {
                   </button>
                 )}
               </div>
-              <p className="text-[10px] text-[var(--color-text-tertiary)] mt-0.5">Mix multiple sounds together</p>
+              <p className="text-[10px] text-[var(--color-text-tertiary)] mt-0.5">
+                {anyPlaying ? 'Mix multiple sounds together' : 'Click a sound to start — layer them for best effect'}
+              </p>
             </div>
             <div className="p-3 space-y-1">
               {PRESETS.map((preset) => {

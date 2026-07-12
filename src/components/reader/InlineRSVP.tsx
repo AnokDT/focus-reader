@@ -67,14 +67,26 @@ function isParagraphBreak(word: string): boolean {
   return /[.!?]$/.test(word)
 }
 
-// Bionic reading: bold first N letters
+// Bionic reading: bold first N letters — thicker, more obvious
 function BionicWord({ word, boldChars = 3 }: { word: string; boldChars?: number }) {
-  const bold = word.slice(0, Math.min(boldChars, word.length))
-  const rest = word.slice(Math.min(boldChars, word.length))
+  const split = Math.min(boldChars, word.length)
+  const bold = word.slice(0, split)
+  const rest = word.slice(split)
   return (
-    <span>
-      <span className="font-bold" style={{ color: 'var(--color-accent)' }}>{bold}</span>
-      <span className="font-normal opacity-70">{rest}</span>
+    <span className="select-none">
+      <span
+        className="font-black"
+        style={{
+          color: 'var(--color-accent)',
+          textShadow: '0 0 8px rgba(var(--color-accent-rgb, 59, 130, 246), 0.4)',
+          fontSize: '1.05em',
+        }}
+      >
+        {bold}
+      </span>
+      <span className="font-normal opacity-50" style={{ letterSpacing: '0.02em' }}>
+        {rest}
+      </span>
     </span>
   )
 }
@@ -552,21 +564,21 @@ export function InlineRSVP({
                   <button
                     onClick={() => setBionicMode((b) => !b)}
                     className={`p-1.5 rounded-lg transition-colors ${bionicMode ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)]' : 'text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-2)]'}`}
-                    title="Bionic reading (B)"
+                    title="Bionic Reading — bold first letters for faster recognition (B)"
                   >
                     <Zap size={14} />
                   </button>
                   <button
                     onClick={() => setFocusTunnel((f) => !f)}
                     className={`p-1.5 rounded-lg transition-colors ${focusTunnel ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)]' : 'text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-2)]'}`}
-                    title="Focus tunnel (F)"
+                    title="Focus Tunnel — dim everything except current word (F)"
                   >
                     {focusTunnel ? <Eye size={14} /> : <EyeOff size={14} />}
                   </button>
                   <button
                     onClick={() => setSmartPauseEnabled((p) => !p)}
                     className={`p-1.5 rounded-lg transition-colors ${smartPauseEnabled ? 'bg-[var(--color-accent)]/15 text-[var(--color-accent)]' : 'text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-2)]'}`}
-                    title="Smart pause"
+                    title="Smart Pause — auto-pause at sentence endings"
                   >
                     <Timer size={14} />
                   </button>
@@ -582,6 +594,27 @@ export function InlineRSVP({
                     <X size={14} />
                   </button>
                 </div>
+
+                {/* Active features indicator */}
+                {(bionicMode || focusTunnel || smartPauseEnabled) && (
+                  <div className="px-4 pb-2 flex items-center gap-2 flex-wrap">
+                    {bionicMode && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[var(--color-accent)]/10 text-[9px] font-medium text-[var(--color-accent)]">
+                        <Zap size={8} /> Bionic
+                      </span>
+                    )}
+                    {focusTunnel && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-500/10 text-[9px] font-medium text-purple-500">
+                        <Eye size={8} /> Tunnel
+                      </span>
+                    )}
+                    {smartPauseEnabled && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/10 text-[9px] font-medium text-amber-500">
+                        <Timer size={8} /> Auto-pause
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </motion.div>
