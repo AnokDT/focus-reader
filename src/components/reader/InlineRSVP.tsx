@@ -301,42 +301,48 @@ export function InlineRSVP({
         </div>
       )}
 
-      {/* FIXED CENTER WORD — eye locks here */}
+      {/* FIXED CENTER WORD — eye locks here, ZERO movement */}
       {!isTransitioning && currentWord && (
         <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none" style={{ zIndex: 60 }}>
-          {/* Fixation line */}
+          {/* Fixation dot — eye anchor point, NEVER moves */}
           <div
-            className="absolute left-1/2 -translate-x-1/2 h-px"
+            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-2 h-2 rounded-full"
             style={{
-              top: '50%',
-              width: '280px',
-              background: 'linear-gradient(90deg, transparent, rgba(250, 204, 21, 0.2), transparent)',
+              background: 'var(--color-accent)',
+              boxShadow: '0 0 8px 2px rgba(var(--color-accent-rgb, 59, 130, 246), 0.4)',
+              opacity: 0.6,
+              zIndex: 62,
             }}
           />
 
-          <AnimatePresence mode="wait">
-            <motion.div
+          {/* Background card — opaque, blocks PDF behind */}
+          <div
+            className="px-12 py-5 rounded-2xl relative"
+            style={{
+              background: 'var(--color-surface-0)',
+              border: '2px solid var(--color-accent)',
+              boxShadow: '0 0 80px 20px rgba(var(--color-accent-rgb, 59, 130, 246), 0.12), 0 12px 40px rgba(0,0,0,0.25)',
+            }}
+          >
+            {/* Word — FADE ONLY, never moves */}
+            <div
+              className="text-center whitespace-nowrap transition-opacity duration-50"
+              style={{ fontFamily: 'var(--font-reading)', opacity: 1 }}
               key={wordAnimKey}
-              initial={{ opacity: 0, scale: 0.85 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 1.15 }}
-              transition={{ duration: 0.06 }}
-              className="text-center whitespace-nowrap"
-              style={{ fontFamily: 'var(--font-reading)' }}
             >
               {bionicMode ? (
                 <BionicWord word={currentWord} />
               ) : (
-                <span className="font-bold text-[var(--color-text-primary)]" style={{ fontSize: '1.75rem' }}>
+                <span className="font-bold text-[var(--color-text-primary)]" style={{ fontSize: '2rem' }}>
                   {currentWord}
                 </span>
               )}
-            </motion.div>
-          </AnimatePresence>
+            </div>
+          </div>
 
-          <div className="text-center mt-1">
-            <span className="text-[10px] tabular-nums text-[var(--color-text-tertiary)]">
-              {currentIndex + 1}/{tokens.length}
+          <div className="text-center mt-2">
+            <span className="text-[11px] tabular-nums text-[var(--color-text-tertiary)]">
+              {currentIndex + 1} / {tokens.length} · Page {pageNumber || '?'}
             </span>
           </div>
         </div>
