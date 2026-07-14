@@ -131,9 +131,13 @@ export function InlineRSVP({
   const prevTextRef = useRef(text)
   const prevStartIndexRef = useRef(-1)
   const currentIndexRef = useRef(0)
+  const tokensRef = useRef(tokens)
+  const wpmRef = useRef(wpm)
 
   autoPlayRef.current = autoPlay
   currentIndexRef.current = currentIndex
+  tokensRef.current = tokens
+  wpmRef.current = wpm
 
   const posMap = useMemo(() => buildPositionMap(tokens, wordPositions), [tokens, wordPositions])
 
@@ -231,32 +235,33 @@ export function InlineRSVP({
 
   // Auto-play with smart pacing
   useEffect(() => {
-    if (!isPlaying || !isSmartPaused) {
-      clearInterval(intervalRef.current as any)
+    if (!isPlaying || isSmartPaused) {
+      clearTimeout(intervalRef.current as any)
       return
     }
 
-    const advance = () => {
-      setCurrentIndex((prev) => {
-        if (prev >= tokens.length - 1) {
-          // Page ended — signal to parent to advance
-          clearTimeout(intervalRef.current as any)
-          setTimeout(() => {
-            setIsPlaying(false)
-            setShowControls(true)
-            onPageEnd?.()
-          }, 100)
-          return prev
-        }
-        const nextIdx = prev + 1
-        const prevWord = tokens[prev]
-        const nextWord = tokens[nextIdx]
-        const delay = getSmartDelay(nextWord, prevWord, wpm)
+    const tick = () => {
+      const curIdx = currentIndexRef.current
+      const toks = tokensRef.current
+      const curWpm = wpmRef.current
 
-        clearTimeout(intervalRef.current as any)
-        intervalRef.current = setTimeout(advance, delay)
-        return nextIdx
-      })
+      if (curIdx >= toks.length - 1) {
+        // Page ended
+        setTimeout(() => {
+          setIsPlaying(false)
+          setShowControls(true)
+          onPageEnd?.()
+        }, 100)
+        return
+      }
+
+      const nextIdx = curIdx + 1
+      const prevWord = toks[curIdx]
+      const nextWord = toks[nextIdx]
+      const delay = getSmartDelay(nextWord, prevWord, curWpm)
+
+      setCurrentIndex(nextIdx)
+      intervalRef.current = setTimeout(tick, delay)
     }
 
     // Start the chain
@@ -264,10 +269,10 @@ export function InlineRSVP({
       ? getSmartDelay(tokens[currentIndex + 1] || '', tokens[currentIndex], wpm)
       : (60 / wpm) * 1000
 
-    intervalRef.current = setTimeout(advance, firstDelay)
+    intervalRef.current = setTimeout(tick, firstDelay)
 
     return () => clearTimeout(intervalRef.current as any)
-  }, [isPlaying, isSmartPaused, wpm, tokens, currentIndex, onPageEnd])
+  }, [isPlaying, isSmartPaused])
 
   // Controls auto-hide
   useEffect(() => {
