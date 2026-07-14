@@ -290,16 +290,17 @@ export function ReaderPage() {
     setPageWords((prev) => ({ ...prev, [pageNumber]: words }))
   }, [])
 
-  // RSVP auto-advance: scroll to next page and continue reading
+  // RSVP auto-advance: seamless page transition
   const handleRSVPEnd = useCallback(() => {
     if (currentPage >= totalPages) {
       setShowInlineRSVP(false)
       setRsvpAutoPlaying(false)
       return
     }
-    // Scroll to next page
+    // Advance to next page seamlessly
     const nextPage = currentPage + 1
-    setRsvpDisplayPage(nextPage) // update display page immediately
+    setRsvpDisplayPage(nextPage)
+    setRsvpStartIndex(0) // Start at beginning of new page
     handlePageChange(nextPage)
     setRsvpAutoPlaying(true)
   }, [currentPage, totalPages, handlePageChange])

@@ -56,8 +56,37 @@ function buildPositionMap(tokens: string[], positions: WordPos[]): Map<number, W
   return map
 }
 
-function isParagraphBreak(word: string): boolean {
-  return /[.!?]$/.test(word)
+// Smart pacing heuristics
+function getSmartDelay(word: string, prevWord: string, baseWpm: number): number {
+  const baseMs = (60 / baseWpm) * 1000
+  let multiplier = 1
+
+  // Paragraph break (sentence ending + next word starts with capital)
+  if (/[.!?]$/.test(prevWord) && /^[A-Z]/.test(word)) {
+    multiplier = 2.5
+  }
+  // Sentence ending
+  else if (/[.!?]$/.test(word)) {
+    multiplier = 1.8
+  }
+  // Comma or semicolon
+  else if (/[,;:]$/.test(word)) {
+    multiplier = 1.3
+  }
+  // Dialogue (word starts with quote)
+  else if (/^["'\u201C\u201D]/.test(word)) {
+    multiplier = 0.85
+  }
+  // Long word (6+ chars)
+  else if (word.length >= 6) {
+    multiplier = 1.1
+  }
+  // Short word (1-2 chars)
+  else if (word.length <= 2) {
+    multiplier = 0.9
+  }
+
+  return baseMs * multiplier
 }
 
 function BionicWord({ word }: { word: string }) {
@@ -87,41 +116,46 @@ export function InlineRSVP({
   const [isPlaying, setIsPlaying] = useState(false)
   const [wpm, setWpm] = useState(300)
   const [showControls, setShowControls] = useState(true)
-  const [isTransitioning, setIsTransitioning] = useState(false)
   const [bionicMode, setBionicMode] = useState(true)
   const [focusTunnel, setFocusTunnel] = useState(false)
   const [smartPauseEnabled, setSmartPauseEnabled] = useState(true)
   const [isSmartPaused, setIsSmartPaused] = useState(false)
 
   const [flowScore, setFlowScore] = useState(100)
-  const [avgWpm, setAvgWpm] = useState(0)
   const wpmHistoryRef = useRef<number[]>([])
 
-  const intervalRef = useRef<ReturnType<typeof setInterval>>(undefined)
+  const intervalRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   const controlsTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const scrollRafRef = useRef<number>(0)
+  const autoPlayRef = useRef(autoPlay)
   const prevTextRef = useRef(text)
   const prevStartIndexRef = useRef(-1)
-  const autoPlayRef = useRef(autoPlay)
+  const currentIndexRef = useRef(0)
 
   autoPlayRef.current = autoPlay
+  currentIndexRef.current = currentIndex
 
   const posMap = useMemo(() => buildPositionMap(tokens, wordPositions), [tokens, wordPositions])
 
+  // Seamless page transition: when text changes, find where we are in the new page
   useEffect(() => {
     if (prevTextRef.current !== text) {
       prevTextRef.current = text
-      setCurrentIndex(0)
-      prevStartIndexRef.current = -1
-      setIsTransitioning(false)
-      if (autoPlayRef.current) setTimeout(() => setIsPlaying(true), 300)
+      // Don't reset to 0 — keep playing from where we were
+      // The startIndex prop tells us where to continue on the new page
+      if (autoPlayRef.current && startIndex >= 0 && startIndex < tokens.length) {
+        setCurrentIndex(startIndex)
+        // Resume playing immediately
+        setTimeout(() => setIsPlaying(true), 50)
+      }
     }
-  }, [text])
+  }, [text, startIndex, tokens.length])
 
   useEffect(() => {
     if (startIndex >= 0 && startIndex < tokens.length && startIndex !== prevStartIndexRef.current) {
       prevStartIndexRef.current = startIndex
       setCurrentIndex(startIndex)
-      setTimeout(() => setIsPlaying(true), 100)
+      setTimeout(() => setIsPlaying(true), 50)
     }
   }, [startIndex, tokens.length])
 
@@ -132,18 +166,18 @@ export function InlineRSVP({
       history.push(wpm)
       if (history.length > 20) history.shift()
       const avg = history.reduce((a, b) => a + b, 0) / history.length
-      setAvgWpm(Math.round(avg))
       const variance = history.reduce((sum, v) => sum + Math.pow(v - avg, 2), 0) / history.length
       const consistency = Math.max(0, 100 - Math.sqrt(variance) / 2)
       setFlowScore(Math.round(consistency * Math.min(1, history.length / 10)))
     }
   }, [currentIndex, isPlaying, wpm])
 
-  // Smart pause
+  // Smart pause at paragraph breaks
   useEffect(() => {
     if (!smartPauseEnabled || !isPlaying) return
     const word = tokens[currentIndex]
-    if (word && isParagraphBreak(word)) {
+    const prevWord = currentIndex > 0 ? tokens[currentIndex - 1] : ''
+    if (word && /[.!?]$/.test(prevWord) && /^[A-Z]/.test(word) && currentIndex > 0) {
       setIsSmartPaused(true)
       setIsPlaying(false)
     }
@@ -165,57 +199,77 @@ export function InlineRSVP({
     }
   }, [currentIndex, currentPos, pageContainerRef])
 
-  // AUTO-SCROLL: follow the highlight down the page
+  // SMOOTH AUTO-SCROLL: RAF-based, escalator feel
   useEffect(() => {
-    if (!highlight || !isPlaying || isTransitioning) return
+    if (!highlight || !isPlaying) return
     if (!pageContainerRef?.current) return
 
     const scrollContainer = pageContainerRef.current.closest('[class*="overflow-auto"]') as HTMLElement | null
     if (!scrollContainer) return
 
+    const targetY = highlight.y
     const scrollRect = scrollContainer.getBoundingClientRect()
-    const wordRelativeY = highlight.y - scrollRect.top
+    const wordRelativeY = targetY - scrollRect.top
     const viewportHeight = scrollRect.height
 
-    // Scroll down when word is in bottom 40% of viewport
-    if (wordRelativeY > viewportHeight * 0.6) {
-      const scrollAmount = wordRelativeY - viewportHeight * 0.35
-      if (scrollAmount > 0) {
-        scrollContainer.scrollBy({ top: scrollAmount, behavior: 'smooth' })
-      }
-    }
-    // Scroll up when word is in top 20% of viewport
-    else if (wordRelativeY < viewportHeight * 0.2) {
-      const scrollAmount = viewportHeight * 0.35 - wordRelativeY
-      if (scrollAmount > 0) {
-        scrollContainer.scrollBy({ top: -scrollAmount, behavior: 'smooth' })
-      }
-    }
-  }, [highlight, isPlaying, isTransitioning, pageContainerRef])
+    // Target: word at 40% from top of viewport
+    const targetViewportY = viewportHeight * 0.4
+    const delta = wordRelativeY - targetViewportY
 
-  const advanceToNextPage = useCallback(() => {
-    if (!onPageEnd) { setIsPlaying(false); return }
-    setIsTransitioning(true)
-    onPageEnd()
-  }, [onPageEnd])
+    // Only scroll if word is outside the comfortable zone (10% dead zone)
+    if (Math.abs(delta) > viewportHeight * 0.1) {
+      const scrollAmount = delta * 0.15 // Smooth lerp
 
-  // Auto-play
+      cancelAnimationFrame(scrollRafRef.current)
+      scrollRafRef.current = requestAnimationFrame(() => {
+        scrollContainer.scrollBy({ top: scrollAmount, behavior: 'auto' })
+      })
+    }
+
+    return () => cancelAnimationFrame(scrollRafRef.current)
+  }, [highlight, isPlaying, pageContainerRef])
+
+  // Auto-play with smart pacing
   useEffect(() => {
-    if (isPlaying && !isTransitioning && !isSmartPaused) {
-      intervalRef.current = setInterval(() => {
-        setCurrentIndex((prev) => {
-          if (prev >= tokens.length - 1) {
-            clearInterval(intervalRef.current)
-            setTimeout(() => { setIsPlaying(false); setShowControls(true) }, 200)
-            return prev
-          }
-          return prev + 1
-        })
-      }, (60 / wpm) * 1000)
+    if (!isPlaying || !isSmartPaused) {
+      clearInterval(intervalRef.current as any)
+      return
     }
-    return () => clearInterval(intervalRef.current)
-  }, [isPlaying, wpm, tokens.length, isTransitioning, isSmartPaused])
 
+    const advance = () => {
+      setCurrentIndex((prev) => {
+        if (prev >= tokens.length - 1) {
+          // Page ended — signal to parent to advance
+          clearTimeout(intervalRef.current as any)
+          setTimeout(() => {
+            setIsPlaying(false)
+            setShowControls(true)
+            onPageEnd?.()
+          }, 100)
+          return prev
+        }
+        const nextIdx = prev + 1
+        const prevWord = tokens[prev]
+        const nextWord = tokens[nextIdx]
+        const delay = getSmartDelay(nextWord, prevWord, wpm)
+
+        clearTimeout(intervalRef.current as any)
+        intervalRef.current = setTimeout(advance, delay)
+        return nextIdx
+      })
+    }
+
+    // Start the chain
+    const firstDelay = currentIndex < tokens.length - 1
+      ? getSmartDelay(tokens[currentIndex + 1] || '', tokens[currentIndex], wpm)
+      : (60 / wpm) * 1000
+
+    intervalRef.current = setTimeout(advance, firstDelay)
+
+    return () => clearTimeout(intervalRef.current as any)
+  }, [isPlaying, isSmartPaused, wpm, tokens, currentIndex, onPageEnd])
+
+  // Controls auto-hide
   useEffect(() => {
     if (showControls) {
       clearTimeout(controlsTimeoutRef.current)
@@ -232,7 +286,6 @@ export function InlineRSVP({
       onPageStart?.()
     }
     setIsPlaying(true)
-    setIsTransitioning(false)
     setIsSmartPaused(false)
     setShowControls(true)
   }, [currentIndex, tokens.length, onPageStart])
@@ -261,13 +314,12 @@ export function InlineRSVP({
       if (e.key === ' ') { e.preventDefault(); e.stopImmediatePropagation(); isPlaying ? handlePause() : handlePlay(); return }
       if (e.key === 'ArrowLeft') { e.stopImmediatePropagation(); handlePrevWord(); return }
       if (e.key === 'ArrowRight') { e.stopImmediatePropagation(); handleNextWord(); return }
-      if (e.key === 'n' || e.key === 'Enter') { e.stopImmediatePropagation(); advanceToNextPage(); return }
       if (e.key === 'b') { e.stopImmediatePropagation(); setBionicMode((b) => !b); return }
       if (e.key === 'f') { e.stopImmediatePropagation(); setFocusTunnel((f) => !f); return }
     }
     window.addEventListener('keydown', handleKey, true)
     return () => window.removeEventListener('keydown', handleKey, true)
-  }, [isPlaying, onClose, handlePlay, handlePause, handlePrevWord, handleNextWord, advanceToNextPage])
+  }, [isPlaying, onClose, handlePlay, handlePause, handlePrevWord, handleNextWord])
 
   useEffect(() => {
     const handleMove = () => setShowControls(true)
@@ -275,22 +327,21 @@ export function InlineRSVP({
     return () => window.removeEventListener('mousemove', handleMove)
   }, [])
 
-  const hasNextPage = (pageNumber || 0) < (totalPages || 0)
   const flowColor = flowScore > 70 ? '#22c55e' : flowScore > 40 ? '#eab308' : '#ef4444'
   const flowLabel = flowScore > 70 ? 'Deep Flow' : flowScore > 40 ? 'Warming Up' : 'Getting Started'
 
   const eyeLockEnabled = useEyeLockStore((s) => s.enabled)
 
-  // Calculate anchor position (optimal viewing position: slightly left of word center)
+  // Anchor position
   const anchorPos = useMemo(() => {
     if (!highlight) return null
-    // Optimal viewing position is ~35% from left of word
-    const optX = highlight.x + highlight.w * 0.35
-    const optY = highlight.y + highlight.h * 0.5
-    return { x: optX, y: optY }
+    return {
+      x: highlight.x + highlight.w * 0.35,
+      y: highlight.y + highlight.h * 0.5,
+    }
   }, [highlight])
 
-  // Line Y for Focus Corridor (relative to scroll container)
+  // Line Y for Focus Corridor
   const lineY = useMemo(() => {
     if (!highlight) return 0
     const scrollContainer = pageContainerRef?.current?.closest('[class*="overflow-auto"]') as HTMLElement | null
@@ -306,7 +357,7 @@ export function InlineRSVP({
   return (
     <>
       {/* EyeLock: Micro-Saccade Anchor */}
-      {eyeLockEnabled && anchorPos && !isTransitioning && (
+      {eyeLockEnabled && anchorPos && (
         <MicroSaccadeAnchor
           x={anchorPos.x}
           y={anchorPos.y}
@@ -315,11 +366,28 @@ export function InlineRSVP({
       )}
 
       {/* EyeLock: Focus Corridor */}
-      {eyeLockEnabled && !isTransitioning && (
+      {eyeLockEnabled && (
         <FocusCorridor
           scrollContainer={scrollContainer}
           currentLineY={lineY}
           lineHeight={highlight?.h || 20}
+        />
+      )}
+
+      {/* Reading Lane — soft vignette on edges */}
+      {eyeLockEnabled && highlight && (
+        <div
+          className="fixed inset-0 pointer-events-none"
+          style={{
+            zIndex: 4,
+            background: `linear-gradient(
+              to right,
+              rgba(0,0,0,0.12) 0%,
+              transparent 25%,
+              transparent 75%,
+              rgba(0,0,0,0.12) 100%
+            )`,
+          }}
         />
       )}
 
@@ -335,8 +403,8 @@ export function InlineRSVP({
         />
       )}
 
-      {/* BIG YELLOW HIGHLIGHTER on the actual PDF text */}
-      {highlight && !isTransitioning && (
+      {/* Current word highlight */}
+      {highlight && (
         <div
           className="fixed pointer-events-none"
           style={{
@@ -347,7 +415,6 @@ export function InlineRSVP({
             zIndex: 55,
           }}
         >
-          {/* Outer glow */}
           <div
             className="absolute -inset-[8px] rounded-lg"
             style={{
@@ -355,7 +422,6 @@ export function InlineRSVP({
               boxShadow: '0 0 30px 8px rgba(250, 204, 21, 0.25)',
             }}
           />
-          {/* Main highlighter */}
           <div
             className="absolute inset-0 rounded-sm"
             style={{
@@ -363,7 +429,6 @@ export function InlineRSVP({
               boxShadow: '0 0 12px 2px rgba(250, 204, 21, 0.3), inset 0 1px 0 rgba(255,255,255,0.2)',
             }}
           />
-          {/* Top marker stroke */}
           <div
             className="absolute top-0 left-0 right-0 h-[2px] rounded-full"
             style={{ background: 'rgba(234, 179, 8, 0.6)' }}
@@ -371,7 +436,7 @@ export function InlineRSVP({
         </div>
       )}
 
-      {/* Control bar — always bottom, with current word */}
+      {/* Control bar */}
       <AnimatePresence>
         {showControls && (
           <motion.div
@@ -390,7 +455,6 @@ export function InlineRSVP({
                 </motion.div>
               )}
 
-              {/* Current word display */}
               <div className="px-6 pt-3 pb-1">
                 <div className="text-center" style={{ fontFamily: 'var(--font-reading)' }}>
                   <span className="text-lg font-bold text-[var(--color-accent)]">
@@ -399,7 +463,6 @@ export function InlineRSVP({
                 </div>
               </div>
 
-              {/* Progress */}
               <div className="px-5">
                 <div className="relative h-1 bg-[var(--color-surface-3)] rounded-full overflow-hidden">
                   <motion.div className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-yellow-400 to-amber-500" animate={{ width: `${progress}%` }} transition={{ duration: 0.1 }} />
@@ -413,7 +476,6 @@ export function InlineRSVP({
                 </div>
               </div>
 
-              {/* Controls */}
               <div className="px-4 py-3 flex items-center justify-between gap-1">
                 <div className="flex items-center gap-0.5">
                   <button onClick={() => setWpm((w) => Math.max(100, w - 25))} className="p-1.5 rounded-lg text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-2)] transition-colors"><Minus size={14} /></button>
@@ -433,9 +495,6 @@ export function InlineRSVP({
                   <button onClick={() => setBionicMode((b) => !b)} className={`p-1.5 rounded-lg transition-colors ${bionicMode ? 'bg-yellow-400/15 text-yellow-600' : 'text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-2)]'}`} title="Bionic (B)"><Zap size={14} /></button>
                   <button onClick={() => setFocusTunnel((f) => !f)} className={`p-1.5 rounded-lg transition-colors ${focusTunnel ? 'bg-purple-500/15 text-purple-500' : 'text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-2)]'}`} title="Tunnel (F)">{focusTunnel ? <Eye size={14} /> : <EyeOff size={14} />}</button>
                   <button onClick={() => setSmartPauseEnabled((p) => !p)} className={`p-1.5 rounded-lg transition-colors ${smartPauseEnabled ? 'bg-amber-500/15 text-amber-500' : 'text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-2)]'}`} title="Smart pause at sentences"><Timer size={14} /></button>
-                  {hasNextPage && (
-                    <button onClick={advanceToNextPage} className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium text-[var(--color-accent)] hover:bg-[var(--color-accent-muted)] transition-colors">Next <ChevronRight size={12} /></button>
-                  )}
                   <button onClick={onClose} className="p-1.5 rounded-lg text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-2)] transition-colors"><X size={14} /></button>
                 </div>
               </div>
