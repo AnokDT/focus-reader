@@ -34,6 +34,8 @@ import { AchievementPopup } from '@/components/reader/AchievementPopup'
 import { ReadingGoalsWidget } from '@/components/reader/ReadingGoalsWidget'
 import { SmartScrollIndicator } from '@/components/reader/SmartScrollIndicator'
 import { ReadingSessionStats } from '@/components/reader/ReadingSessionStats'
+import { ReadingLane } from '@/components/reader/ReadingLane'
+import { useEyeLockStore } from '@/stores/eyeLockStore'
 import { useExportNotes } from '@/components/reader/ExportNotes'
 import { useAchievementStore } from '@/stores/achievementStore'
 import {
@@ -559,6 +561,8 @@ export function ReaderPage() {
       />
 
       <div className="flex-1 flex overflow-hidden relative">
+        {/* EyeLock: Reading Lane — works during normal reading too */}
+        <ReadingLane active={!showInlineRSVP} />
         {/* Heatmap sidebar */}
         {showHeatmap && totalPages > 0 && (
           <div className="w-10 border-r border-[var(--color-surface-3)] bg-[var(--color-surface-1)] shrink-0 theme-transition flex flex-col items-center">
