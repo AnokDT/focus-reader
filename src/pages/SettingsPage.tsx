@@ -148,6 +148,86 @@ export function SettingsPage() {
           )}
         </Section>
 
+        <Section title="Typography">
+          <div className="space-y-3">
+            <p className="text-sm font-medium text-[var(--color-text-secondary)]">Font</p>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { value: 'Inter, system-ui, sans-serif', label: 'Inter' },
+                { value: 'Georgia, serif', label: 'Georgia' },
+                { value: 'Merriweather, serif', label: 'Merriweather' },
+                { value: 'JetBrains Mono, monospace', label: 'Mono' },
+              ].map((font) => (
+                <button
+                  key={font.value}
+                  onClick={() => eyeLock.setFontFamily(font.value)}
+                  className={`px-3 py-2 rounded-lg border text-sm transition-all ${
+                    eyeLock.fontFamily === font.value
+                      ? 'border-[var(--color-accent)] bg-[var(--color-accent-muted)] text-[var(--color-accent)]'
+                      : 'border-[var(--color-surface-3)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-1)]'
+                  }`}
+                  style={{ fontFamily: font.value }}
+                >
+                  {font.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <Slider
+            label="Font size"
+            min={14}
+            max={28}
+            value={eyeLock.fontSize}
+            onChange={eyeLock.setFontSize}
+            formatValue={(v: number) => `${v}px`}
+          />
+          <Slider
+            label="Line height"
+            min={1.2}
+            max={2.2}
+            step={0.1}
+            value={eyeLock.lineHeight}
+            onChange={eyeLock.setLineHeight}
+            formatValue={(v: number) => `${v.toFixed(1)}x`}
+          />
+          <Slider
+            label="Paragraph spacing"
+            min={0.5}
+            max={2.5}
+            step={0.1}
+            value={eyeLock.paragraphSpacing}
+            onChange={eyeLock.setParagraphSpacing}
+            formatValue={(v: number) => `${v.toFixed(1)}x`}
+          />
+          <Slider
+            label="Text width"
+            min={480}
+            max={900}
+            step={20}
+            value={eyeLock.textWidth}
+            onChange={eyeLock.setTextWidth}
+            formatValue={(v: number) => `${v}px`}
+          />
+          <Slider
+            label="Font weight"
+            min={300}
+            max={600}
+            step={100}
+            value={eyeLock.fontWeight}
+            onChange={eyeLock.setFontWeight}
+            formatValue={(v: number) => `${v}`}
+          />
+          <Slider
+            label="Letter spacing"
+            min={-0.02}
+            max={0.08}
+            step={0.01}
+            value={eyeLock.letterSpacing}
+            onChange={eyeLock.setLetterSpacing}
+            formatValue={(v: number) => `${(v * 100).toFixed(0)}%`}
+          />
+        </Section>
+
         <Section title="Goals">
           <Toggle
             label="Daily reading goal"

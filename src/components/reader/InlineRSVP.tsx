@@ -4,6 +4,8 @@ import { Play, Pause, X, Minus, Plus, ChevronRight, ChevronLeft, Zap, Eye, EyeOf
 import type { WordPos } from '@/components/pdf/PDFPageRenderer'
 import { MicroSaccadeAnchor } from './MicroSaccadeAnchor'
 import { FocusCorridor } from './FocusCorridor'
+import { ReadingLane } from './ReadingLane'
+import { FlowScore } from './FlowScore'
 import { useEyeLockStore } from '@/stores/eyeLockStore'
 
 interface InlineRSVPProps {
@@ -334,9 +336,6 @@ export function InlineRSVP({
     return () => window.removeEventListener('mousemove', handleMove)
   }, [])
 
-  const flowColor = flowScore > 70 ? '#22c55e' : flowScore > 40 ? '#eab308' : '#ef4444'
-  const flowLabel = flowScore > 70 ? 'Deep Flow' : flowScore > 40 ? 'Warming Up' : 'Getting Started'
-
   const eyeLockEnabled = useEyeLockStore((s) => s.enabled)
 
   // Anchor position
@@ -381,22 +380,8 @@ export function InlineRSVP({
         />
       )}
 
-      {/* Reading Lane — soft vignette on edges */}
-      {eyeLockEnabled && highlight && (
-        <div
-          className="fixed inset-0 pointer-events-none"
-          style={{
-            zIndex: 4,
-            background: `linear-gradient(
-              to right,
-              rgba(0,0,0,0.12) 0%,
-              transparent 25%,
-              transparent 75%,
-              rgba(0,0,0,0.12) 100%
-            )`,
-          }}
-        />
-      )}
+      {/* Reading Lane — immersive viewport */}
+      <ReadingLane active={isPlaying || currentIndex > 0} />
 
       {/* Focus Tunnel — dim everything except highlight area */}
       {focusTunnel && highlight && (
@@ -474,11 +459,8 @@ export function InlineRSVP({
                 <div className="relative h-1 bg-[var(--color-surface-3)] rounded-full overflow-hidden">
                   <motion.div className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-yellow-400 to-amber-500" animate={{ width: `${progress}%` }} transition={{ duration: 0.1 }} />
                 </div>
-                <div className="flex items-center justify-between mt-1.5">
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: flowColor, boxShadow: `0 0 6px ${flowColor}` }} />
-                    <span className="text-[10px] font-medium" style={{ color: flowColor }}>{flowLabel}</span>
-                  </div>
+                <div className="flex items-center justify-between mt-2">
+                  <FlowScore score={flowScore} compact />
                   <span className="text-[10px] text-[var(--color-text-tertiary)] tabular-nums">{wpm} WPM · Pg {pageNumber || '?'}</span>
                 </div>
               </div>
