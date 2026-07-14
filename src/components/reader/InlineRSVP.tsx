@@ -2,6 +2,9 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Play, Pause, X, Minus, Plus, ChevronRight, ChevronLeft, Zap, Eye, EyeOff, Timer } from 'lucide-react'
 import type { WordPos } from '@/components/pdf/PDFPageRenderer'
+import { MicroSaccadeAnchor } from './MicroSaccadeAnchor'
+import { FocusCorridor } from './FocusCorridor'
+import { useEyeLockStore } from '@/stores/eyeLockStore'
 
 interface InlineRSVPProps {
   text: string
@@ -276,8 +279,50 @@ export function InlineRSVP({
   const flowColor = flowScore > 70 ? '#22c55e' : flowScore > 40 ? '#eab308' : '#ef4444'
   const flowLabel = flowScore > 70 ? 'Deep Flow' : flowScore > 40 ? 'Warming Up' : 'Getting Started'
 
+  const eyeLockEnabled = useEyeLockStore((s) => s.enabled)
+
+  // Calculate anchor position (optimal viewing position: slightly left of word center)
+  const anchorPos = useMemo(() => {
+    if (!highlight) return null
+    // Optimal viewing position is ~35% from left of word
+    const optX = highlight.x + highlight.w * 0.35
+    const optY = highlight.y + highlight.h * 0.5
+    return { x: optX, y: optY }
+  }, [highlight])
+
+  // Line Y for Focus Corridor (relative to scroll container)
+  const lineY = useMemo(() => {
+    if (!highlight) return 0
+    const scrollContainer = pageContainerRef?.current?.closest('[class*="overflow-auto"]') as HTMLElement | null
+    if (!scrollContainer) return highlight.y
+    const scrollRect = scrollContainer.getBoundingClientRect()
+    return highlight.y - scrollRect.top + scrollContainer.scrollTop
+  }, [highlight, pageContainerRef])
+
+  const scrollContainer = useMemo(() => {
+    return pageContainerRef?.current?.closest('[class*="overflow-auto"]') as HTMLElement | null
+  }, [pageContainerRef])
+
   return (
     <>
+      {/* EyeLock: Micro-Saccade Anchor */}
+      {eyeLockEnabled && anchorPos && !isTransitioning && (
+        <MicroSaccadeAnchor
+          x={anchorPos.x}
+          y={anchorPos.y}
+          wordHeight={highlight?.h || 14}
+        />
+      )}
+
+      {/* EyeLock: Focus Corridor */}
+      {eyeLockEnabled && !isTransitioning && (
+        <FocusCorridor
+          scrollContainer={scrollContainer}
+          currentLineY={lineY}
+          lineHeight={highlight?.h || 20}
+        />
+      )}
+
       {/* Focus Tunnel — dim everything except highlight area */}
       {focusTunnel && highlight && (
         <div
@@ -395,11 +440,12 @@ export function InlineRSVP({
                 </div>
               </div>
 
-              {(bionicMode || focusTunnel || smartPauseEnabled) && (
+              {(bionicMode || focusTunnel || smartPauseEnabled || eyeLockEnabled) && (
                 <div className="px-4 pb-2 flex items-center gap-2 flex-wrap">
                   {bionicMode && <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-yellow-400/10 text-[9px] font-medium text-yellow-600"><Zap size={8} /> Bionic</span>}
                   {focusTunnel && <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-500/10 text-[9px] font-medium text-purple-500"><Eye size={8} /> Tunnel</span>}
                   {smartPauseEnabled && <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/10 text-[9px] font-medium text-amber-500"><Timer size={8} /> Auto-pause</span>}
+                  {eyeLockEnabled && <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-500/10 text-[9px] font-medium text-blue-500"><span className="w-1.5 h-1.5 rounded-full bg-blue-500" /> EyeLock</span>}
                 </div>
               )}
             </div>

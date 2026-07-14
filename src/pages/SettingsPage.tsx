@@ -1,6 +1,6 @@
-import { motion } from 'framer-motion'
 import { Sun, Moon, Coffee, RotateCcw } from 'lucide-react'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { useEyeLockStore } from '@/stores/eyeLockStore'
 import { Slider } from '@/components/ui/Slider'
 import { Toggle } from '@/components/ui/Toggle'
 import { Button } from '@/components/ui/Button'
@@ -23,6 +23,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 export function SettingsPage() {
   const settings = useSettingsStore()
+  const eyeLock = useEyeLockStore()
 
   return (
     <div className="h-full overflow-y-auto">
@@ -100,6 +101,51 @@ export function SettingsPage() {
             checked={settings.scrollBehavior === 'smooth'}
             onChange={(v: boolean) => settings.setScrollBehavior(v ? 'smooth' : 'instant')}
           />
+        </Section>
+
+        <Section title="EyeLock Reading Engine">
+          <Toggle
+            label="EyeLock"
+            description="Visual reading assistance system"
+            checked={eyeLock.enabled}
+            onChange={eyeLock.setEnabled}
+          />
+          {eyeLock.enabled && (
+            <>
+              <Toggle
+                label="Micro-Saccade Anchor"
+                description="Tiny fixation dot that guides your eye"
+                checked={eyeLock.anchorEnabled}
+                onChange={eyeLock.setAnchorEnabled}
+              />
+              {eyeLock.anchorEnabled && (
+                <Slider
+                  label="Anchor intensity"
+                  min={5}
+                  max={25}
+                  value={eyeLock.anchorIntensity}
+                  onChange={eyeLock.setAnchorIntensity}
+                  formatValue={(v: number) => `${v}%`}
+                />
+              )}
+              <Toggle
+                label="Focus Corridor"
+                description="Subtle brightness gradient on current line"
+                checked={eyeLock.corridorEnabled}
+                onChange={eyeLock.setCorridorEnabled}
+              />
+              {eyeLock.corridorEnabled && (
+                <Slider
+                  label="Corridor intensity"
+                  min={5}
+                  max={30}
+                  value={eyeLock.corridorIntensity}
+                  onChange={eyeLock.setCorridorIntensity}
+                  formatValue={(v: number) => `${v}%`}
+                />
+              )}
+            </>
+          )}
         </Section>
 
         <Section title="Goals">
