@@ -66,6 +66,11 @@ export const useEyeLockStore = create<EyeLockState>()(
     }),
     {
       name: 'focus-reader-eyelock',
+      merge: (persisted: any, current) => ({
+        ...current,
+        ...persisted,
+        enabled: persisted?.enabled ?? true,
+      }),
     }
   )
 )
