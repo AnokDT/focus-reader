@@ -13,14 +13,14 @@ function ReadingLaneInner({ active }: ReadingLaneProps) {
   return (
     <div
       className="fixed inset-0 pointer-events-none"
-      style={{ zIndex: 3 }}
+      style={{ zIndex: 45 }}
     >
       {/* Top fade */}
       <div
         className="absolute top-0 left-0 right-0"
         style={{
-          height: '35%',
-          background: 'linear-gradient(to bottom, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.05) 60%, transparent 100%)',
+          height: '30%',
+          background: 'linear-gradient(to bottom, rgba(0,0,0,0.25) 0%, rgba(0,0,0,0.08) 50%, transparent 100%)',
         }}
       />
 
@@ -28,26 +28,26 @@ function ReadingLaneInner({ active }: ReadingLaneProps) {
       <div
         className="absolute bottom-0 left-0 right-0"
         style={{
-          height: '35%',
-          background: 'linear-gradient(to top, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.05) 60%, transparent 100%)',
+          height: '30%',
+          background: 'linear-gradient(to top, rgba(0,0,0,0.25) 0%, rgba(0,0,0,0.08) 50%, transparent 100%)',
         }}
       />
 
-      {/* Left edge softness */}
+      {/* Left edge */}
       <div
         className="absolute top-0 bottom-0 left-0"
         style={{
-          width: '15%',
-          background: 'linear-gradient(to right, rgba(0,0,0,0.08) 0%, transparent 100%)',
+          width: '12%',
+          background: 'linear-gradient(to right, rgba(0,0,0,0.12) 0%, transparent 100%)',
         }}
       />
 
-      {/* Right edge softness */}
+      {/* Right edge */}
       <div
         className="absolute top-0 bottom-0 right-0"
         style={{
-          width: '15%',
-          background: 'linear-gradient(to left, rgba(0,0,0,0.08) 0%, transparent 100%)',
+          width: '12%',
+          background: 'linear-gradient(to left, rgba(0,0,0,0.12) 0%, transparent 100%)',
         }}
       />
     </div>
