@@ -133,35 +133,37 @@ export function InlineRSVP({
   const currentIndexRef = useRef(0)
   const tokensRef = useRef(tokens)
   const wpmRef = useRef(wpm)
+  const onPageEndRef = useRef(onPageEnd)
 
   autoPlayRef.current = autoPlay
   currentIndexRef.current = currentIndex
   tokensRef.current = tokens
   wpmRef.current = wpm
+  onPageEndRef.current = onPageEnd
 
   const posMap = useMemo(() => buildPositionMap(tokens, wordPositions), [tokens, wordPositions])
 
-  // Seamless page transition: when text changes, find where we are in the new page
+  // Seamless page transition: when text changes, continue from startIndex
   useEffect(() => {
     if (prevTextRef.current !== text) {
       prevTextRef.current = text
-      // Don't reset to 0 — keep playing from where we were
-      // The startIndex prop tells us where to continue on the new page
-      if (autoPlayRef.current && startIndex >= 0 && startIndex < tokens.length) {
+      if (autoPlayRef.current) {
         setCurrentIndex(startIndex)
-        // Resume playing immediately
+        prevStartIndexRef.current = startIndex
         setTimeout(() => setIsPlaying(true), 50)
       }
     }
-  }, [text, startIndex, tokens.length])
+  }, [text, startIndex])
 
   useEffect(() => {
-    if (startIndex >= 0 && startIndex < tokens.length && startIndex !== prevStartIndexRef.current) {
+    if (startIndex !== prevStartIndexRef.current) {
       prevStartIndexRef.current = startIndex
       setCurrentIndex(startIndex)
-      setTimeout(() => setIsPlaying(true), 50)
+      if (autoPlayRef.current) {
+        setTimeout(() => setIsPlaying(true), 50)
+      }
     }
-  }, [startIndex, tokens.length])
+  }, [startIndex])
 
   // Flow score
   useEffect(() => {
@@ -250,7 +252,7 @@ export function InlineRSVP({
         setTimeout(() => {
           setIsPlaying(false)
           setShowControls(true)
-          onPageEnd?.()
+          onPageEndRef.current?.()
         }, 100)
         return
       }
