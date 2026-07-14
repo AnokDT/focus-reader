@@ -33,6 +33,7 @@ import { PomodoroTimer } from '@/components/reader/PomodoroTimer'
 import { AchievementPopup } from '@/components/reader/AchievementPopup'
 import { ReadingGoalsWidget } from '@/components/reader/ReadingGoalsWidget'
 import { SmartScrollIndicator } from '@/components/reader/SmartScrollIndicator'
+import { ReadingSessionStats } from '@/components/reader/ReadingSessionStats'
 import { useExportNotes } from '@/components/reader/ExportNotes'
 import { useAchievementStore } from '@/stores/achievementStore'
 import {
@@ -84,6 +85,7 @@ export function ReaderPage() {
   const [showTTS, setShowTTS] = useState(false)
   const [showPomodoro, setShowPomodoro] = useState(false)
   const [showAchievements, setShowAchievements] = useState(false)
+  const [showSessionStats, setShowSessionStats] = useState(false)
   const [pageTimes, setPageTimes] = useState<Record<number, number>>({})
 
   // Annotation state
@@ -832,6 +834,17 @@ export function ReaderPage() {
 
       {/* Achievements */}
       <AchievementPopup isOpen={showAchievements} onClose={() => setShowAchievements(false)} />
+
+      {/* Session Stats */}
+      <ReadingSessionStats
+        isOpen={showSessionStats}
+        onClose={() => setShowSessionStats(false)}
+        pageTimes={pageTimes}
+        currentPage={currentPage}
+        totalPages={totalPages}
+        flowScore={100}
+        wpm={300}
+      />
 
       <AnimatePresence>
         {focus.enabled && <FocusControls isVisible={focus.enabled} />}
