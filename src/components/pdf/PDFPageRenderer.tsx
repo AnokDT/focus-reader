@@ -102,6 +102,7 @@ export function PDFPageRenderer({
       const dpr = window.devicePixelRatio || 1
 
       const canvas = canvasRef.current
+      if (!canvas) { setLoading(false); return }
       canvas.width = Math.floor(viewport.width * dpr)
       canvas.height = Math.floor(viewport.height * dpr)
       canvas.style.width = `${Math.floor(viewport.width)}px`
